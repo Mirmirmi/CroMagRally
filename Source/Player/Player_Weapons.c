@@ -1804,6 +1804,8 @@ ObjNode						*newObj;
 		.scale		= 1.0,
 	};
 	newObj = MakeNewDisplayGroupObject(&def);
+	if (newObj == nil)
+		return;
 
 	newObj->CType 			= CTYPE_TRIGGER|CTYPE_AVOID;
 	newObj->Kind		 	= TRIGTYPE_LANDMINE;

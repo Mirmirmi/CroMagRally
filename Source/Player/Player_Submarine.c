@@ -50,6 +50,9 @@ static void AlignPropellerOnSubmarine(ObjNode *theCar);
 
 #define	BubbleTimer		SpecialF[0]
 
+static float	gSubStuckTimer[MAX_PLAYERS] = {0};      // Per-player stuck timer
+static float	gSubSideForce[MAX_PLAYERS] = {0};       // Persistent sideways force during evasion
+
 
 /*************************** INIT PLAYER: SUBMARINE ****************************/
 //
@@ -105,6 +108,8 @@ ObjNode			*newObj;
 				/* SET GLOBALS */
 
 	gPlayerInfo[playerNum].objNode 	= newObj;
+	gSubStuckTimer[playerNum] = 0.0f;
+	gSubSideForce[playerNum] = 0.0f;
 
 
 
@@ -544,8 +549,6 @@ float			fps = gFramesPerSecondFrac;
 float			dot;
 OGLVector2D		pathVec;
 short			avoidTurn;
-static float    stuckTimer[MAX_PLAYERS] = {0};      // Per-player stuck timer
-static float    sideForce[MAX_PLAYERS] = {0};       // Persistent sideways force during evasion
 
     player = theNode->PlayerNum;
     gPlayerInfo[player].controlBits = 0;                                     // assume nothing
@@ -570,11 +573,11 @@ static float    sideForce[MAX_PLAYERS] = {0};       // Persistent sideways force
 								gCoord.x, gCoord.y, gCoord.z) < 1000.0f) 
 			{
 				// Submarine is considered "stuck", so set evasion timer
-				stuckTimer[player] = SUB_STUCK_EVASION_DURATION; 
+				gSubStuckTimer[player] = SUB_STUCK_EVASION_DURATION; 
 			}
 			else
 			{
-				stuckTimer[player] = 0.0f;
+				gSubStuckTimer[player] = 0.0f;
 			}
 
 			gPlayerInfo[player].oldPosition = gCoord;						// remember position
@@ -599,30 +602,30 @@ static float    sideForce[MAX_PLAYERS] = {0};       // Persistent sideways force
 
 		/* 2. STUCK EVASION */
 
-    else if (stuckTimer[player] > 0.0f)
+    else if (gSubStuckTimer[player] > 0.0f)
     {
 		// Sideways force to ensure sub can escape from floor-to-ceiling objects
 		float sidewaysforce_update = 1.0f; // How often the sub has its x-axis direction reassigned while stuck
-        if ((int)(stuckTimer[player] * sidewaysforce_update) != (int)((stuckTimer[player] - fps) * sidewaysforce_update)) // Update sideways force every second
+        if ((int)(gSubStuckTimer[player] * sidewaysforce_update) != (int)((gSubStuckTimer[player] - fps) * sidewaysforce_update)) // Update sideways force every second
         {
-            sideForce[player] = (MyRandomLong() & 1) ? 1.0f : -1.0f; // randomly assign either full left or full right directional movement
+            gSubSideForce[player] = (MyRandomLong() & 1) ? 1.0f : -1.0f; // randomly assign either full left or full right directional movement
         }
 
 		// Try to get unstuck 
-		gPlayerInfo[player].analogSteering.x = sideForce[player];		
+		gPlayerInfo[player].analogSteering.x = gSubSideForce[player];		
         gPlayerInfo[player].analogSteering.y = 1.0f; // Continuous upward thrust
         
         // Check if we've become unstuck
         if (CalcDistance3D(gPlayerInfo[player].oldPosition.x, gPlayerInfo[player].oldPosition.y, 
                           gPlayerInfo[player].oldPosition.z, gCoord.x, gCoord.y, gCoord.z) > 1000.0f)
         {
-            stuckTimer[player] = 0.0f;
-            sideForce[player] = 0.0f;
+            gSubStuckTimer[player] = 0.0f;
+            gSubSideForce[player] = 0.0f;
         }
         else
         {
 			// Change this - should not be based on fps.
-            stuckTimer[player] -= fps;
+            gSubStuckTimer[player] -= fps;
         }
     }
 
@@ -659,7 +662,7 @@ static float    sideForce[MAX_PLAYERS] = {0};       // Persistent sideways force
     if (currentHeight > 4000.0f) { 										// Same limit as was originally imposed in commented out code
         gPlayerInfo[player].analogSteering.y = -1.0f;  
     } 
-    else if (currentHeight < 3500.0f && stuckTimer[player] <= 0.0f) { 	// Reset y-steering to normal once in safe zone
+    else if (currentHeight < 3500.0f && gSubStuckTimer[player] <= 0.0f) { 	// Reset y-steering to normal once in safe zone
         gPlayerInfo[player].analogSteering.y = 0.0f;   
     }
 	

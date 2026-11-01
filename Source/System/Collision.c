@@ -254,18 +254,76 @@ long		leftSide,rightSide,frontSide,backSide,bottomSide,topSide;
 
 				if (!sideBits)														// see if anything actually happened
 				{
-					continue;
+					if (cBits & ALL_SOLID_SIDES)
+					{
+						/* Fallback for deep penetration or high relative speed: boxes intersect but edge-crossing wasn't caught */
+						float absX = fabsf(relDX);
+						float absY = fabsf(relDY);
+						float absZ = fabsf(relDZ);
+
+						if (absZ >= absX && absZ >= absY && absZ > 0.0f)
+						{
+							if (relDZ > 0.0f && (cBits & SIDE_BITS_BACK))
+								sideBits |= SIDE_BITS_FRONT;
+							else if (relDZ < 0.0f && (cBits & SIDE_BITS_FRONT))
+								sideBits |= SIDE_BITS_BACK;
+						}
+						else if (absX >= absZ && absX >= absY && absX > 0.0f)
+						{
+							if (relDX > 0.0f && (cBits & SIDE_BITS_LEFT))
+								sideBits |= SIDE_BITS_RIGHT;
+							else if (relDX < 0.0f && (cBits & SIDE_BITS_RIGHT))
+								sideBits |= SIDE_BITS_LEFT;
+						}
+						else if (absY > 0.0f)
+						{
+							if (relDY > 0.0f && (cBits & SIDE_BITS_BOTTOM))
+								sideBits |= SIDE_BITS_TOP;
+							else if (relDY < 0.0f && (cBits & SIDE_BITS_TOP))
+								sideBits |= SIDE_BITS_BOTTOM;
+						}
+
+						if (!sideBits)
+						{
+							float overlapZ = (baseBoxList->front < targetBoxList[target].front ? baseBoxList->front : targetBoxList[target].front) -
+											 (baseBoxList->back > targetBoxList[target].back ? baseBoxList->back : targetBoxList[target].back);
+							float overlapX = (baseBoxList->right < targetBoxList[target].right ? baseBoxList->right : targetBoxList[target].right) -
+											 (baseBoxList->left > targetBoxList[target].left ? baseBoxList->left : targetBoxList[target].left);
+
+							if (overlapZ <= overlapX)
+							{
+								if ((baseBoxList->front - targetBoxList[target].back) < (targetBoxList[target].front - baseBoxList->back))
+									sideBits = SIDE_BITS_FRONT;
+								else
+									sideBits = SIDE_BITS_BACK;
+							}
+							else
+							{
+								if ((baseBoxList->right - targetBoxList[target].left) < (targetBoxList[target].right - baseBoxList->left))
+									sideBits = SIDE_BITS_RIGHT;
+								else
+									sideBits = SIDE_BITS_LEFT;
+							}
+						}
+					}
+					else
+					{
+						continue;
+					}
 				}
 
 						/* ADD TO COLLISION LIST */
 got_sides:
-				gCollisionList[gNumCollisions].baseBox = 0;
-				gCollisionList[gNumCollisions].targetBox = target;
-				gCollisionList[gNumCollisions].sides = sideBits;
-//				gCollisionList[gNumCollisions].type = COLLISION_TYPE_OBJ;
-				gCollisionList[gNumCollisions].objectPtr = thisNode;
-				gNumCollisions++;
-				gTotalSides |= sideBits;											// remember total of this
+				if (gNumCollisions < MAX_COLLISIONS)
+				{
+					gCollisionList[gNumCollisions].baseBox = 0;
+					gCollisionList[gNumCollisions].targetBox = target;
+					gCollisionList[gNumCollisions].sides = sideBits;
+//					gCollisionList[gNumCollisions].type = COLLISION_TYPE_OBJ;
+					gCollisionList[gNumCollisions].objectPtr = thisNode;
+					gNumCollisions++;
+					gTotalSides |= sideBits;											// remember total of this
+				}
 			}
 		}
 next:

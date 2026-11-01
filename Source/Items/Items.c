@@ -336,10 +336,11 @@ Boolean	isSolid = itemPtr->parm[3] & 1;
 		return false;
 	}
 
+	short type = SDL_clamp(itemPtr->parm[0], 0, 1);
 	NewObjectDefinitionType def =
 	{
 		.group 		= MODEL_GROUP_LEVELSPECIFIC,
-		.type 		= types[gTrackNum][itemPtr->parm[0]],
+		.type 		= types[gTrackNum][type],
 		.coord.x 	= x,
 		.coord.z 	= z,
 		.coord.y 	= GetTerrainY(x,z),
@@ -544,7 +545,7 @@ static const ColumnInfo info[NUM_TRACKS] =
 };
 
 Boolean	notSolid = itemPtr->parm[3] & 1;						// see if solid or not
-short	type = itemPtr->parm[0];
+short	type = SDL_clamp(itemPtr->parm[0], 0, 3);
 
 	NewObjectDefinitionType def =
 	{
@@ -713,10 +714,11 @@ static const short types[NUM_TRACKS][2] =
 };
 
 
+	short type = SDL_clamp(itemPtr->parm[0], 0, 1);
 	NewObjectDefinitionType def =
 	{
 		.group 		= MODEL_GROUP_LEVELSPECIFIC,
-		.type 		= types[gTrackNum][itemPtr->parm[0]],
+		.type 		= types[gTrackNum][type],
 		.coord.x 	= x,
 		.coord.z 	= z,
 		.flags 		= gAutoFadeStatusBits,
@@ -1035,6 +1037,8 @@ ObjNode	*newObj;
 	def.coord.y	= GetTerrainY(x,z) + 50.0f;
 	def.scale	= 1.5f;
 	newObj = MakeNewDisplayGroupObject(&def);
+	if (newObj == nil)
+		return(false);
 	newObj->Scale.x = 3;
 	newObj->Scale.z = 3;
 	UpdateObjectTransforms(newObj);
@@ -1287,7 +1291,7 @@ static const HouseInfo info[NUM_TRACKS] =
 };
 
 Boolean	notSolid = itemPtr->parm[3] & 1;						// see if solid or not
-short	type = itemPtr->parm[0];
+short	type = SDL_clamp(itemPtr->parm[0], 0, 3);
 
 	NewObjectDefinitionType def =
 	{

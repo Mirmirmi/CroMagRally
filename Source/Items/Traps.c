@@ -958,7 +958,7 @@ OGLPoint3D			pt;
 
 	endPoints[0].x = goddess->Coord.x;
 	endPoints[0].y = goddess->Coord.y + 1000.0f;
-	endPoints[0].z = goddess->Coord.x;
+	endPoints[0].z = goddess->Coord.z;
 
 
 		/* CALC INTERMEDIATE & END POINTS */
@@ -1503,7 +1503,7 @@ OGLPoint3D			pt;
 
 	endPoints[0].x = goddess->Coord.x;
 	endPoints[0].y = goddess->Coord.y;
-	endPoints[0].z = goddess->Coord.x;
+	endPoints[0].z = goddess->Coord.z;
 
 
 		/* CALC INTERMEDIATE & END POINTS */

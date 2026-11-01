@@ -201,6 +201,9 @@ short			powType;
 float			heightOff;
 
 	powType = itemPtr->parm[0];								// get POW type
+	if (powType < 0 || powType >= MAX_POW_TYPES)
+		return false;
+
 	heightOff = (float)itemPtr->parm[1] * 400.0f;			// get height off ground
 
 				/* CREATE OBJECT */
@@ -847,7 +850,7 @@ float	fps;
 	gCoord.x += gDelta.x * fps;
 	gCoord.z += gDelta.z * fps;
 
-	if (GetTerrainY(gCoord.x, gCoord.y) >= gCoord.y)		// see if hit ground
+	if (GetTerrainY(gCoord.x, gCoord.z) >= gCoord.y)		// see if hit ground
 	{
 		DeleteObject(theNode);
 		return;
@@ -2030,8 +2033,8 @@ short	p;
 			/* DOUBLE STUFF */
 
 	gPlayerInfo[p].powQuantity = 20;
-	gPlayerInfo[p].stickyTiresTimer = 20;
-	gPlayerInfo[p].superSuspensionTimer = 20;
+	SetStickyTires(p);
+	SetSuspensionPOW(p);
 
 	return(true);
 }

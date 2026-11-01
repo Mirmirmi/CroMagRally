@@ -1109,8 +1109,8 @@ void FadeOutArea(void)
 void MoveEverything(void)
 {
 
-	MoveObjects();
 	MoveSplineObjects();
+	MoveObjects();
 	MoveParticleGroups();
 	UpdateCameras(false, false);				// update cameras for ALL players
 	CalcPlayerPlaces();							// determinw who is in what place

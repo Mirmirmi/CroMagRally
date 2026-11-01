@@ -53,7 +53,7 @@ void SetSkeletonAnim(SkeletonObjDataType *skeleton, long animNum)
 	if (skeleton == nil)
 		return;
 
-	if (animNum >= skeleton->skeletonDefinition->NumAnims)
+	if (animNum < 0 || animNum >= skeleton->skeletonDefinition->NumAnims)
 	{
 		DoFatalAlert("SetSkeletonAnim: illegal animNum");
 	}
@@ -87,7 +87,7 @@ SkeletonDefType	*skeletonDef;
 	if (skeleton == nil)
 		return;
 
-	if (animNum >= skeleton->skeletonDefinition->NumAnims)
+	if (animNum < 0 || animNum >= skeleton->skeletonDefinition->NumAnims)
 		DoFatalAlert("MorphToSkeletonAnim: bad anim #");
 
 	SetSkeletonAnim(skeleton,animNum);

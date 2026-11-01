@@ -218,6 +218,7 @@ SkeletonFile_AnimHeader_Type	*animHeaderPtr;
 	ReleaseResource(hand);
 
 	GAME_ASSERT(numJoints <= MAX_JOINTS);							// check for overload
+	GAME_ASSERT(numAnims <= MAX_ANIMS);
 
 
 				/*************************************/

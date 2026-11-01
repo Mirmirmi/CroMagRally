@@ -395,7 +395,7 @@ float					minX,minY,minZ,maxX,maxY,maxZ;
 
 				/* BUILD TRIANGLE INFO */
 
-		for (i = j = 0; i < MAX_NUBS_IN_FENCE; i++, j+=2)
+		for (i = j = 0; i < MAX_NUBS_IN_FENCE - 1; i++, j+=2)
 		{
 			gFenceTriangles[f][j].vertexIndices[0] = 1 + j;
 			gFenceTriangles[f][j].vertexIndices[1] = 0 + j;
