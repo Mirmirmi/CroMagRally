@@ -1,10 +1,10 @@
-# Cro-Mag Rally
+# Cro-Mag Rally (Custom Fork)
 
-## *The wildest racing game since man invented the wheel!*
+> **Note & Attribution:** This repository is a personal fork of **[Iliyas Jorio’s modern port of Cro-Mag Rally (`jorio/CroMagRally`)](https://github.com/jorio/CroMagRally)**. Nearly all of the port to modern operating systems is Jorio’s work (upon Pangea Software’s original 2000 game); this fork layers a custom vehicle, physics/gameplay bug fixes, and Raspberry Pi (`aarch64`) build support on top of his port.
+>
+> The section immediately below lists the changes made in this fork, followed by **[Jorio’s original README](#original-upstream-readme-by-iliyas-jorio)** preserved in full.
 
-This is a customized fork of [jorio/CroMagRally](https://github.com/jorio/CroMagRally) (the modern port of Pangea Software’s **Cro-Mag Rally**), featuring a custom 11th vehicle, physics and collision fixes, gameplay bug fixes, and Linux `aarch64` (Raspberry Pi) AppImage build support.
-
-## How This Fork Differs from Upstream (`v4.0.1`)
+## Changes in This Fork (`v4.0.1`)
 
 ### New Vehicle: **Scuttle-saur** (`CAR_TYPE_LIZARD`)
 - **Custom 3D Vehicle & Texture:** Adds a brand-new 11th land vehicle—the **Scuttle-saur**, a crested prehistoric reptile racer with a custom 3D mesh and 256×256 procedural scale texture packed into [`Data/Models/carparts.bg3d`](Data/Models/carparts.bg3d) and [`Data/Models/carselect.bg3d`](Data/Models/carselect.bg3d).
@@ -29,7 +29,13 @@ This is a customized fork of [jorio/CroMagRally](https://github.com/jorio/CroMag
 
 ---
 
-**Upstream releases (macOS, Windows, and Linux):** https://github.com/jorio/CroMagRally/releases
+## Original Upstream README (by [Iliyas Jorio](https://github.com/jorio/CroMagRally))
+
+### *The wildest racing game since man invented the wheel!*
+
+This is a port of Pangea Software’s racing game **Cro-Mag Rally** to modern operating systems.
+
+**Download the game for macOS, Windows and Linux here:** https://github.com/jorio/CroMagRally/releases
 
 ![Cro-Mag Rally Screenshot](docs/screenshot.webp)
 
