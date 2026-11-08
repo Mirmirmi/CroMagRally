@@ -113,7 +113,8 @@ static const MenuItem gPhysicsMenuTree[] =
 				{STR_CAR_MODEL_8, 7},
 				{STR_CAR_MODEL_9, 8},
 				{STR_CAR_MODEL_10, 9},
-				//{STR_CAR_MODEL_11, 1},	// don't expose submarine
+				{STR_CAR_MODEL_11, 10},
+				//{STR_CAR_MODEL_12, 1},	// don't expose submarine
 			}
 		},
 		.customHeight = 1,

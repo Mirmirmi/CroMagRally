@@ -318,6 +318,7 @@ enum
 	CARPARTS_ObjType_Body_Geode,
 	CARPARTS_ObjType_Body_Log,
 	CARPARTS_ObjType_Body_Turtle,
+	CARPARTS_ObjType_Body_Lizard,
 	CARPARTS_ObjType_Body_Rock,
 	CARPARTS_ObjType_Body_TrojanHorse,
 	CARPARTS_ObjType_Body_Obelisk,
@@ -348,6 +349,11 @@ enum
 	CARPARTS_ObjType_Wheel_TurtleFR,
 	CARPARTS_ObjType_Wheel_TurtleBR,
 	CARPARTS_ObjType_Wheel_TurtleBL,
+
+	CARPARTS_ObjType_Wheel_LizardFL,
+	CARPARTS_ObjType_Wheel_LizardFR,
+	CARPARTS_ObjType_Wheel_LizardBR,
+	CARPARTS_ObjType_Wheel_LizardBL,
 
 	CARPARTS_ObjType_Wheel_RockFL,
 	CARPARTS_ObjType_Wheel_RockFR,

@@ -124,6 +124,7 @@ const UserPhysics kDefaultPhysics =
 		[CAR_TYPE_OBELISK]		= {{5, 3, 6, 7}},
 		[CAR_TYPE_CATAPULT]		= {{6, 7, 5, 4}},
 		[CAR_TYPE_CHARIOT]		= {{7, 7, 4, 3}},
+		[CAR_TYPE_LIZARD]		= {{5, 4, 5, 4}},
 		[CAR_TYPE_SUB]			= {{0, 7, 0, 0}},
 	},
 };
@@ -200,36 +201,47 @@ short			carType;
 ObjNode			*newObj;
 static const float bottomOffsets[NUM_LAND_CAR_TYPES] =
 {
-	-57,				// mammoth
-	-78,				// bone buggy
-	-94,				// geode
-	-99,				// log
-	-63,				// turtle
-	-89,				// rock
-
-	-127,				// trojan
-	-107,				// obelisk
-
-	-77,				// catapult
-	-100,				// chariot
-
+	[CAR_TYPE_MAMMOTH]     = -57,
+	[CAR_TYPE_BONEBUGGY]   = -78,
+	[CAR_TYPE_GEODE]       = -94,
+	[CAR_TYPE_LOG]         = -99,
+	[CAR_TYPE_TURTLE]      = -63,
+	[CAR_TYPE_LIZARD]      = -54,
+	[CAR_TYPE_ROCK]        = -89,
+	[CAR_TYPE_TROJANHORSE] = -127,
+	[CAR_TYPE_OBELISK]     = -107,
+	[CAR_TYPE_CATAPULT]    = -77,
+	[CAR_TYPE_CHARIOT]     = -100,
 };
 
 static const float shadowScale[NUM_LAND_CAR_TYPES] =
 {
-	11.0,				// mammoth
-	9.0,				// bone buggy
-	12.0,				// geode
-	11.5,				// log
-	10.5,				// turtle
-	9.0,				// rock
+	[CAR_TYPE_MAMMOTH]     = 11.0,
+	[CAR_TYPE_BONEBUGGY]   = 9.0,
+	[CAR_TYPE_GEODE]       = 12.0,
+	[CAR_TYPE_LOG]         = 11.5,
+	[CAR_TYPE_TURTLE]      = 10.5,
+	[CAR_TYPE_LIZARD]      = 11.5,
+	[CAR_TYPE_ROCK]        = 9.0,
+	[CAR_TYPE_TROJANHORSE] = 12.0,
+	[CAR_TYPE_OBELISK]     = 11.0,
+	[CAR_TYPE_CATAPULT]    = 9.0,
+	[CAR_TYPE_CHARIOT]     = 10.0,
+};
 
-	12,					// trojan
-	11,					// obelisk
-
-	9,					// catapult
-	10,					// chariot
-
+static const int shadowTypes[NUM_LAND_CAR_TYPES] =
+{
+	[CAR_TYPE_MAMMOTH]     = SHADOW_TYPE_CAR_MAMMOTH,
+	[CAR_TYPE_BONEBUGGY]   = SHADOW_TYPE_CAR_BONE,
+	[CAR_TYPE_GEODE]       = SHADOW_TYPE_CAR_GEODE,
+	[CAR_TYPE_LOG]         = SHADOW_TYPE_CAR_LOG,
+	[CAR_TYPE_TURTLE]      = SHADOW_TYPE_CAR_TURTLE,
+	[CAR_TYPE_LIZARD]      = SHADOW_TYPE_CAR_TURTLE,
+	[CAR_TYPE_ROCK]        = SHADOW_TYPE_CAR_ROCK,
+	[CAR_TYPE_TROJANHORSE] = SHADOW_TYPE_CAR_TROJAN,
+	[CAR_TYPE_OBELISK]     = SHADOW_TYPE_CAR_OBELISK,
+	[CAR_TYPE_CATAPULT]    = SHADOW_TYPE_CAR_CATAPULT,
+	[CAR_TYPE_CHARIOT]     = SHADOW_TYPE_CAR_CHARIOT,
 };
 
 	carType = gPlayerInfo[playerNum].vehicleType;
@@ -273,7 +285,7 @@ static const float shadowScale[NUM_LAND_CAR_TYPES] =
 
 				/* MAKE SHADOW */
 
-	AttachShadowToObject(newObj, SHADOW_TYPE_CAR_MAMMOTH + carType, shadowScale[carType], shadowScale[carType], true);
+	AttachShadowToObject(newObj, shadowTypes[carType], shadowScale[carType], shadowScale[carType], true);
 
 
 	return(newObj);
@@ -3282,6 +3294,7 @@ static const OGLPoint3D	wheelOffsets[NUM_LAND_CAR_TYPES][4] =
 	[CAR_TYPE_OBELISK]     = { {-111,-58,-89},	{111,-58,-89},	{112,-38,79},	{-112,-38,79} },
 	[CAR_TYPE_CATAPULT]    = { {-108,-38,-109},	{108,-38,-109},	{112,-10,105},	{-112,-10,105} },
 	[CAR_TYPE_CHARIOT]     = { {-122,-28,-80},	{122,-28,-80},	{122,-2,85},	{-122,-2,85} },
+	[CAR_TYPE_LIZARD]      = { {-74,-14,-72},	{74,-14,-72},	{68,-10,64},	{-68,-10,64} },
 };
 
 
@@ -3297,6 +3310,7 @@ static const OGLPoint3D	headOffsets[NUM_LAND_CAR_TYPES] =
 	[CAR_TYPE_OBELISK]     = { 0, 85, 22 },
 	[CAR_TYPE_CATAPULT]    = { 0, 85, 10 },
 	[CAR_TYPE_CHARIOT]     = { 0, 85, 10 },
+	[CAR_TYPE_LIZARD]      = { 0, 58, 5 },
 };
 
 
@@ -3406,7 +3420,25 @@ static const OGLPoint3D	headOffsets[NUM_LAND_CAR_TYPES] =
 		if (!gPlayerInfo[playerNum].braking)														// wheels do not spin during braking
 			wheels[i]->WheelSpinRot -= dr;
 
-		OGLMatrix4x4_SetRotate_X(&m1, wheels[i]->WheelSpinRot);										// set rotation matrix
+		if (carType == CAR_TYPE_LIZARD && i == 0)
+		{
+			float speedFactor = theCar->Speed2D * 0.00045f;
+			if (speedFactor > 1.0f)
+				speedFactor = 1.0f;
+			float waddle = sinf(wheels[0]->WheelSpinRot) * speedFactor;
+			OGLMatrix4x4_SetRotate_Y(&m1, waddle * 0.085f);
+			OGLMatrix4x4_SetRotate_Z(&m2, waddle * 0.045f);
+			OGLMatrix4x4_Multiply(&m2, &m1, &m3);
+			OGLMatrix4x4_Multiply(&m3, carMatrix, &m1);
+			*carMatrix = m1;
+			SetObjectTransformMatrix(theCar);
+		}
+
+		float spinRot = wheels[i]->WheelSpinRot;
+		if (carType == CAR_TYPE_LIZARD && (i & 1))
+			spinRot += PI;
+
+		OGLMatrix4x4_SetRotate_X(&m1, spinRot);														// set rotation matrix
 
 
 		if (i < 2)																					// set y rot for turning on front 2 wheels

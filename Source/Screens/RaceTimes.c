@@ -414,7 +414,12 @@ static void LayOutScoreboardForTrack(void)
 			if (record->vehicleType != CAR_TYPE_SUB)
 			{
 				defCar.slot = slot++;
-				defCar.type = 1 + record->vehicleType;
+				int iconIdx = record->vehicleType;
+				if (iconIdx == CAR_TYPE_LIZARD)
+					iconIdx = CAR_TYPE_TURTLE;
+				else if (iconIdx > CAR_TYPE_LIZARD)
+					iconIdx -= 1;
+				defCar.type = 1 + iconIdx;
 				nodes[n++] = MakeSpriteObject(&defCar);
 			}
 		}

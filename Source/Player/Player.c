@@ -177,7 +177,7 @@ Boolean	taken[NUM_LAND_CAR_TYPES];
 	i = GetNumAgesCompleted();
 	if (i > 2)														// dont get extra cars after winning, so pin @ 2
 		i = 2;
-	type = 6 + (i * 2)-1;											// start @ end of usable cars so it will pick best cars
+	type = 7 + (i * 2)-1;											// start @ end of usable cars so it will pick best cars
 
 
 			/* SET SOME GLOBALS */

@@ -220,7 +220,7 @@ int					age;
 	age = GetNumAgesCompleted();
 	if (age > 2)											// prevent extra cars after winning Iron Age
 		age = 2;
-	gNumVehiclesToChooseFrom = 6 + (age * 2);				// set # cars we can pick from
+	gNumVehiclesToChooseFrom = 7 + (age * 2);				// set # cars we can pick from
 
 	if (gNumRealPlayers > 1)							// let use any car in mutliplayer mode
 		gNumVehiclesToChooseFrom = NUM_LAND_CAR_TYPES;
