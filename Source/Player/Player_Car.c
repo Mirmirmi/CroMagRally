@@ -1726,7 +1726,17 @@ Boolean		wasInWater;
 
 			if (ctype & CTYPE_PLAYER)
 			{
-				VehicleHitVehicle(vehicle, hitObj);
+				Boolean alreadyHit = false;
+				for (short j = 0; j < i; j++)
+				{
+					if (gCollisionList[j].objectPtr == hitObj)
+					{
+						alreadyHit = true;
+						break;
+					}
+				}
+				if (!alreadyHit)
+					VehicleHitVehicle(vehicle, hitObj);
 			}
 
 				/**********************/
@@ -1982,6 +1992,8 @@ short		p2 = car2->PlayerNum;
 	gDelta.x += b1.x;
 	gDelta.y += b1.y;
 	gDelta.z += b1.z;
+
+	car1->Delta = gDelta;
 
 	car2->Delta.x += b2.x;
 	car2->Delta.y += b2.y;

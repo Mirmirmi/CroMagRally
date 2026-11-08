@@ -159,9 +159,9 @@ long		leftSide,rightSide,frontSide,backSide,bottomSide,topSide;
 				if (cBits & CBITS_TOUCHABLE)				// if it's generically touchable, then add it without side info
 					goto got_sides;
 
-				relDX = realDX - thisNode->Delta.x;			// calc relative deltas
-				relDY = realDY - thisNode->Delta.y;
-				relDZ = realDZ - thisNode->Delta.z;
+				relDX = realDX - (thisNode->Delta.x * gFramesPerSecondFrac);	// calc relative deltas
+				relDY = realDY - (thisNode->Delta.y * gFramesPerSecondFrac);
+				relDZ = realDZ - (thisNode->Delta.z * gFramesPerSecondFrac);
 
 								/* CHECK FRONT COLLISION */
 
@@ -256,55 +256,67 @@ long		leftSide,rightSide,frontSide,backSide,bottomSide,topSide;
 				{
 					if (cBits & ALL_SOLID_SIDES)
 					{
-						/* Fallback for deep penetration or high relative speed: boxes intersect but edge-crossing wasn't caught */
-						float absX = fabsf(relDX);
-						float absY = fabsf(relDY);
-						float absZ = fabsf(relDZ);
+						/* Fallback for already-overlapping boxes: separate along minimum penetration depth */
+						long minPen = 0x7fffffffL;
+						long pen;
 
-						if (absZ >= absX && absZ >= absY && absZ > 0.0f)
+						if (cBits & SIDE_BITS_BACK)
 						{
-							if (relDZ > 0.0f && (cBits & SIDE_BITS_BACK))
-								sideBits |= SIDE_BITS_FRONT;
-							else if (relDZ < 0.0f && (cBits & SIDE_BITS_FRONT))
-								sideBits |= SIDE_BITS_BACK;
+							pen = baseBoxList->front - targetBoxList[target].back;
+							if (pen >= 0 && pen < minPen)
+							{
+								minPen = pen;
+								sideBits = SIDE_BITS_FRONT;
+							}
 						}
-						else if (absX >= absZ && absX >= absY && absX > 0.0f)
+						if (cBits & SIDE_BITS_FRONT)
 						{
-							if (relDX > 0.0f && (cBits & SIDE_BITS_LEFT))
-								sideBits |= SIDE_BITS_RIGHT;
-							else if (relDX < 0.0f && (cBits & SIDE_BITS_RIGHT))
-								sideBits |= SIDE_BITS_LEFT;
+							pen = targetBoxList[target].front - baseBoxList->back;
+							if (pen >= 0 && pen < minPen)
+							{
+								minPen = pen;
+								sideBits = SIDE_BITS_BACK;
+							}
 						}
-						else if (absY > 0.0f)
+						if (cBits & SIDE_BITS_LEFT)
 						{
-							if (relDY > 0.0f && (cBits & SIDE_BITS_BOTTOM))
-								sideBits |= SIDE_BITS_TOP;
-							else if (relDY < 0.0f && (cBits & SIDE_BITS_TOP))
-								sideBits |= SIDE_BITS_BOTTOM;
+							pen = baseBoxList->right - targetBoxList[target].left;
+							if (pen >= 0 && pen < minPen)
+							{
+								minPen = pen;
+								sideBits = SIDE_BITS_RIGHT;
+							}
+						}
+						if (cBits & SIDE_BITS_RIGHT)
+						{
+							pen = targetBoxList[target].right - baseBoxList->left;
+							if (pen >= 0 && pen < minPen)
+							{
+								minPen = pen;
+								sideBits = SIDE_BITS_LEFT;
+							}
+						}
+						if ((cBits & SIDE_BITS_TOP) && (relDY <= 0.0f))
+						{
+							pen = targetBoxList[target].top - baseBoxList->bottom;
+							if (pen >= 0 && pen < minPen)
+							{
+								minPen = pen;
+								sideBits = SIDE_BITS_BOTTOM;
+							}
+						}
+						if ((cBits & SIDE_BITS_BOTTOM) && (relDY >= 0.0f))
+						{
+							pen = baseBoxList->top - targetBoxList[target].bottom;
+							if (pen >= 0 && pen < minPen)
+							{
+								minPen = pen;
+								sideBits = SIDE_BITS_TOP;
+							}
 						}
 
 						if (!sideBits)
-						{
-							float overlapZ = (baseBoxList->front < targetBoxList[target].front ? baseBoxList->front : targetBoxList[target].front) -
-											 (baseBoxList->back > targetBoxList[target].back ? baseBoxList->back : targetBoxList[target].back);
-							float overlapX = (baseBoxList->right < targetBoxList[target].right ? baseBoxList->right : targetBoxList[target].right) -
-											 (baseBoxList->left > targetBoxList[target].left ? baseBoxList->left : targetBoxList[target].left);
-
-							if (overlapZ <= overlapX)
-							{
-								if ((baseBoxList->front - targetBoxList[target].back) < (targetBoxList[target].front - baseBoxList->back))
-									sideBits = SIDE_BITS_FRONT;
-								else
-									sideBits = SIDE_BITS_BACK;
-							}
-							else
-							{
-								if ((baseBoxList->right - targetBoxList[target].left) < (targetBoxList[target].right - baseBoxList->left))
-									sideBits = SIDE_BITS_RIGHT;
-								else
-									sideBits = SIDE_BITS_LEFT;
-							}
-						}
+							continue;
 					}
 					else
 					{
@@ -363,19 +375,20 @@ short		oldNumCollisions;
 
 	gNumCollisions = oldNumCollisions = 0;
 	gTotalSides = 0;
+	totalSides = 0;
+
+again:
+	numSolidHits = 0;
+	oldNumCollisions = gNumCollisions;
 
 	originalX = gCoord.x;									// remember starting coords
 	originalY = gCoord.y;
 	originalZ = gCoord.z;
 
-again:
-	numSolidHits = 0;
-
 	CalcObjectBoxFromGlobal(theNode);						// calc current collision box
 
 	CollisionDetect(theNode,cType, gNumCollisions);			// get collision info
 
-	totalSides = 0;
 	maxOffsetX = maxOffsetZ = maxOffsetY = -10000;
 	offXSign = offYSign = offZSign = 0;
 
