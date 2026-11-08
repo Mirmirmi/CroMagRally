@@ -2,9 +2,34 @@
 
 ## *The wildest racing game since man invented the wheel!*
 
-This is a port of Pangea Software’s racing game **Cro-Mag Rally** to modern operating systems.
+This is a customized fork of [jorio/CroMagRally](https://github.com/jorio/CroMagRally) (the modern port of Pangea Software’s **Cro-Mag Rally**), featuring a custom 11th vehicle, physics and collision fixes, gameplay bug fixes, and Linux `aarch64` (Raspberry Pi) AppImage build support.
 
-**Download the game for macOS, Windows and Linux here:** https://github.com/jorio/CroMagRally/releases
+## How This Fork Differs from Upstream (`v4.0.1`)
+
+### New Vehicle: **Scuttle-saur** (`CAR_TYPE_LIZARD`)
+- **Custom 3D Vehicle & Texture:** Adds a brand-new 11th land vehicle—the **Scuttle-saur**, a crested prehistoric reptile racer with a custom 3D mesh and 256×256 procedural scale texture packed into [`Data/Models/carparts.bg3d`](Data/Models/carparts.bg3d) and [`Data/Models/carselect.bg3d`](Data/Models/carselect.bg3d).
+- **Rotary Lizard Gait & Body Slither:** Replaces standard spinning wheels with 360° rotary crank legs (diagonal pairs `FL+BR` and `FR+BL` 180° out of phase) and a speed-synced sinusoidal body yaw/roll waddle in [`Source/Player/Player_Car.c`](Source/Player/Player_Car.c).
+- **Balanced Mid-Pack Stats & Stone Age Unlock:** Positioned at slot 6 in the vehicle lineup (unlocked from the start in Stone Age tournaments and available to CPU racers), matching the Bone Buggy's speed and acceleration (`5, 4`) with enhanced stability (`5` Traction, `4` Suspension).
+- **Full Localization & Editor Support:** Localized across English, French, German, Spanish, Italian, and Dutch in [`Data/System/strings.csv`](Data/System/strings.csv) and exposed in the in-game Physics Editor.
+
+### Collision & Physics Fixes
+- **Relative Collision Velocity Scaling:** Fixes a unit mismatch in [`CollisionDetect()`](Source/System/Collision.c) where per-second target velocity (`thisNode->Delta`) was subtracted directly from per-subpass displacement (`realDX/Y/Z`), which previously inverted relative velocity signs for objects moving in the same direction (causing no-clip collisions on wandering Vikings/trolls and same-direction vehicles).
+- **Minimum Penetration Depth Resolution:** Resolves already-overlapping solid bounding boxes along the shallowest penetration axis (`minPen`) rather than velocity direction, preventing side-by-side vehicle scrapes or rear-end contacts from slingshotting cars across opposite bounding box faces.
+- **Multi-Pass Collision & Momentum Sync:** Fixes [`HandleCollisions()`](Source/System/Collision.c) so secondary collision passes do not undo primary pass separation or queue duplicate collision entries, deduplicates [`VehicleHitVehicle()`](Source/Player/Player_Car.c) per sub-pass, and keeps `car1->Delta` synchronized with `gDelta`.
+- **Spline Execution Order:** Runs `MoveSplineObjects()` before `MoveObjects()` in [`MoveEverything()`](Source/System/Main.c) so spline-driven hazards and NPCs have up-to-date positions before collision detection.
+
+### Gameplay, AI & Stability Fixes
+- **Druid Powerup Trigger:** Fixes the Stonehenge Druid trigger in [`Source/Items/Triggers.c`](Source/Items/Triggers.c) so it properly activates `SetStickyTires()` and `SetSuspensionPOW()` physics routines instead of only setting timers.
+- **Goddess Lightning & Cactus Terrain Coordinates:** Fixes coordinate typos in [`Source/Items/Traps.c`](Source/Items/Traps.c) (using `goddess->Coord.z` instead of `Coord.x` for lightning endpoints) and [`Source/Items/Triggers.c`](Source/Items/Triggers.c) (sampling terrain height at `(x, z)` instead of `(x, y)` for exploding cactus parts).
+- **Submarine AI State Reset:** Resets per-player submarine stuck/evasion timers on player initialization in [`Source/Player/Player_Submarine.c`](Source/Player/Player_Submarine.c) so state does not leak across Atlantis races.
+- **Memory & Bounds Hardening:** Fixes a fence vertex index over-read in [`Source/Terrain/Fences.c`](Source/Terrain/Fences.c), clamps item type parameters in [`Source/Items/Items.c`](Source/Items/Items.c) and [`Source/Items/Triggers.c`](Source/Items/Triggers.c), guards `MakeNewDisplayGroupObject()` against `NULL` dereferences, and validates skeleton animation indices in [`Source/Skeleton/SkeletonAnim.c`](Source/Skeleton/SkeletonAnim.c) and [`Source/System/File.c`](Source/System/File.c).
+
+### Build & CI Changes
+- **Linux `aarch64` (Raspberry Pi) AppImage CI:** Updates [`.github/workflows/ReleaseBuilds.yml`](.github/workflows/ReleaseBuilds.yml) to automatically build native `aarch64` and `x86_64` Linux AppImages on push.
+
+---
+
+**Upstream releases (macOS, Windows, and Linux):** https://github.com/jorio/CroMagRally/releases
 
 ![Cro-Mag Rally Screenshot](docs/screenshot.webp)
 
