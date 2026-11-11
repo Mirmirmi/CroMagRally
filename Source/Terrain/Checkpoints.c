@@ -37,6 +37,9 @@ short				gWorstHumanPlace;
 
 void NextLap(short p)
 {
+	if (gPlayerInfo[p].raceComplete)
+		return;
+
 	gPlayerInfo[p].lapNum++;
 
 	if (gPlayerInfo[p].lapNum >= gNumLapsThisRace)					// see if completed race
@@ -364,23 +367,19 @@ void PlayerCompletedRace(short playerNum)
 
 			/* TELL WINNER IN MULTIPLAYER RACE */
 			//
-			// Game ends as soon as 1st player finishes the race
+			// Game ends as soon as the 1st human finishes the race
 			//
 
 	if (gGameMode == GAME_MODE_MULTIPLAYERRACE)
 	{
-		short	i;
-
-		if (!gTrackCompleted)									// only if this is the 1st guy to win
+		if (!gTrackCompleted && !gPlayerInfo[playerNum].isComputer)
 		{
-			for (i = 0; i < gNumTotalPlayers; i++)				// see which player Won (was not eliminated)
+			for (short i = 0; i < gNumTotalPlayers; i++)
 			{
-				if (i != playerNum)
+				if (!gPlayerInfo[i].isComputer && gPlayerInfo[i].onThisMachine)
 				{
-					ShowWinLose(i, 2, playerNum);					// lost
+					ShowFinalPlace(i, (i == playerNum) ? rankInScoreboard : -1);
 				}
-				else
-					ShowWinLose(i, 1, playerNum);					// won!
 			}
 
 			gTrackCompleted = true;

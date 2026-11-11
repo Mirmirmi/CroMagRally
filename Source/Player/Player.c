@@ -30,6 +30,7 @@
 short		gNumRealPlayers = 1;                // # of actual human players (on computer and/or network)
 short       gNumTotalPlayers = 0;               // # of total player characters in game (real + CPU)
 short		gNumLocalPlayers = 1;				// 2 if split-screen, otherwise 1
+Byte		gMultiplayerCPUs = 1;				// add CPU racers to fill multiplayer race slots
 
 ObjNode		*gCurrentPlayer;
 short		gCurrentPlayerNum = 0;				// current player number of player being processed (via MovePlayer et. al.)
@@ -134,8 +135,11 @@ short	i;
 	{
 		case	GAME_MODE_PRACTICE:
 		case	GAME_MODE_TOURNAMENT:
-//		case	GAME_MODE_MULTIPLAYERRACE:
 				gNumTotalPlayers = MAX_PLAYERS;                 // use them all
+				break;
+
+		case	GAME_MODE_MULTIPLAYERRACE:
+				gNumTotalPlayers = gMultiplayerCPUs ? MAX_PLAYERS : gNumRealPlayers;
 				break;
 
 		default:
@@ -144,6 +148,41 @@ short	i;
 
 
 	}
+}
+
+
+static short PickMultiplayerCPUVehicle(Boolean taken[NUM_LAND_CAR_TYPES], uint32_t *rngState)
+{
+	if (!gNetGameInProgress)
+	{
+		*rngState ^= *rngState << 13;
+		*rngState ^= *rngState >> 17;
+		*rngState ^= *rngState << 5;
+	}
+
+	if (gGamePrefs.difficulty == DIFFICULTY_HARD)				// in hard mode, CPUs can duplicate cars
+	{
+		return gNetGameInProgress
+			? RandomRange(0, NUM_LAND_CAR_TYPES - 1)
+			: (short)(*rngState % NUM_LAND_CAR_TYPES);
+	}
+
+	short available[NUM_LAND_CAR_TYPES];
+	int count = 0;
+	for (int v = 0; v < NUM_LAND_CAR_TYPES; v++)
+	{
+		if (!taken[v])
+			available[count++] = (short)v;
+	}
+
+	if (count == 0)
+		return 0;
+
+	short pick = gNetGameInProgress
+		? available[RandomRange(0, count - 1)]
+		: available[*rngState % count];
+	taken[pick] = true;
+	return pick;
 }
 
 
@@ -156,6 +195,7 @@ void InitPlayersAtStartOfLevel(void)
 {
 int		i,j,type;
 Boolean	taken[NUM_LAND_CAR_TYPES];
+uint32_t mpVehicleRng = (uint32_t)SDL_GetPerformanceCounter() | 1u;
 
 	gWorstHumanPlace = 0;
 
@@ -186,7 +226,11 @@ Boolean	taken[NUM_LAND_CAR_TYPES];
 	{
 		if (gPlayerInfo[i].isComputer)									// set CPU vehicle type
 		{
-			if (gGamePrefs.difficulty == DIFFICULTY_HARD)				// in hard mode, the CPU can have duplicate cars
+			if (gGameMode == GAME_MODE_MULTIPLAYERRACE)
+			{
+				gPlayerInfo[i].vehicleType = PickMultiplayerCPUVehicle(taken, &mpVehicleRng);
+			}
+			else if (gGamePrefs.difficulty == DIFFICULTY_HARD)			// in hard mode, the CPU can have duplicate cars
 				gPlayerInfo[i].vehicleType = RandomRange(0, type);
 			else														// in other difficulty modes, only choose unique cars
 			{

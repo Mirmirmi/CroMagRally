@@ -161,7 +161,7 @@ static float	gMapFit = 1;
 
 float			gStartingLightTimer;
 
-ObjNode			*gFinalPlaceObj = nil;
+ObjNode			*gFinalPlaceObj[MAX_PLAYERS] = {nil};
 
 Boolean			gHideInfobar = false;
 
@@ -414,10 +414,12 @@ static const char*	maps[] =
 		/* SETUP STARTING LIGHT */
 
 	gStartingLightTimer = 3.0;											// init starting light
-	gFinalPlaceObj = nil;
 
 	for (int i = 0; i < MAX_PLAYERS; i++)
+	{
+		gFinalPlaceObj[i] = nil;
 		gWinLoseString[i] = nil;
+	}
 
 
 			/* LOAD MAP SPRITE */
@@ -1675,24 +1677,31 @@ short	sex;
 	if ((!gPlayerInfo[playerNum].onThisMachine) || gPlayerInfo[playerNum].isComputer)
 		return;
 
+	if (gFinalPlaceObj[playerNum])
+		return;
+
 	place = gPlayerInfo[playerNum].place;
 	sex = gPlayerInfo[playerNum].sex;
+	int pane = gPlayerInfo[playerNum].splitPaneNum;
 
 			/* HIDE MOST OF THE INFOBAR */
 
-	HideIconObjects(playerNum, ICON_PLACE);
-	HideIconObjects(playerNum, ICON_WRONGWAY);
-	HideIconObjects(playerNum, ICON_LAP);
-	HideIconObjects(playerNum, ICON_WEAPON_RACE);
-	HideIconObjects(playerNum, ICON_RACETIMER1);
-	HideIconObjects(playerNum, ICON_RACETIMER2);
-	HideIconObjects(playerNum, ICON_LAPTIMER);
+	HideIconObjects(pane, ICON_PLACE);
+	HideIconObjects(pane, ICON_WRONGWAY);
+	HideIconObjects(pane, ICON_LAP);
+	HideIconObjects(pane, ICON_WEAPON_RACE);
+	HideIconObjects(pane, ICON_RACETIMER1);
+	HideIconObjects(pane, ICON_RACETIMER2);
+	HideIconObjects(pane, ICON_LAPTIMER);
 
 			/* ANNOUNCE PLACE */
 
-	PlayAnnouncerSound(EFFECT_1st + place, true, 1.0);
+	if (gPlayerInfo[playerNum].raceComplete)
+		PlayAnnouncerSound(EFFECT_1st + place, true, 1.0);
 
 			/* MAKE NUMBER SPRITE */
+
+	float paneScale = (gNumSplitScreenPanes > 1) ? 0.72f : 1.0f;
 
 	NewObjectDefinitionType spriteDef =
 	{
@@ -1702,7 +1711,7 @@ short	sex;
 		.flags		= STATUS_BIT_ONLYSHOWTHISPLAYER,
 		.slot		= SPRITE_SLOT,
 		.moveCall	= MoveFinalPlace,
-		.scale		= 1.5,
+		.scale		= 1.5f * paneScale,
 		.player		= playerNum,								// only show for this player
 	};
 
@@ -1711,11 +1720,11 @@ short	sex;
 	{
 		case LANGUAGE_FRENCH:
 		case LANGUAGE_ITALIAN:
-			spriteDef.coord.x += 18;
+			spriteDef.coord.x += 18.0f * paneScale;
 			break;
 	}
 
-	gFinalPlaceObj = MakeSpriteObject(&spriteDef);
+	gFinalPlaceObj[playerNum] = MakeSpriteObject(&spriteDef);
 
 			/* MAKE ORDINAL SPRITE ON TOP OF NUMBER */
 
@@ -1724,26 +1733,28 @@ short	sex;
 	ObjNode* ordinalObj = MakeSpriteObject(&spriteDef);
 	ordinalObj->PlayerNum = playerNum;
 
-	AppendNodeToChain(gFinalPlaceObj, ordinalObj);
+	AppendNodeToChain(gFinalPlaceObj[playerNum], ordinalObj);
 
-	MakeTwitch(gFinalPlaceObj, kTwitchPreset_FinalPlaceReveal);
+	MakeTwitch(gFinalPlaceObj[playerNum], kTwitchPreset_FinalPlaceReveal);
 	MakeTwitch(ordinalObj, kTwitchPreset_FinalPlaceReveal);
 
 			/* MAKE RACE TIME TEXT */
 
-	if (IsRaceMode())
+	if (IsRaceMode() && gPlayerInfo[playerNum].raceComplete)
 	{
 		const char* timeStr = FormatRaceTime(GetRaceTime(playerNum));
 
 		NewObjectDefinitionType textDef =
 		{
-			.slot = GetChainTailNode(gFinalPlaceObj)->Slot + 1,
-			.coord = {0,90,0},
-			.scale = 0.8,
+			.slot = GetChainTailNode(gFinalPlaceObj[playerNum])->Slot + 1,
+			.coord = {0, 90.0f * paneScale, 0},
+			.flags = STATUS_BIT_ONLYSHOWTHISPLAYER,
+			.scale = 0.8f * paneScale,
+			.player = playerNum,
 		};
 		ObjNode* yourTimeObj = TextMesh_New(timeStr, 0, &textDef);
 
-		AppendNodeToChain(gFinalPlaceObj, yourTimeObj);
+		AppendNodeToChain(gFinalPlaceObj[playerNum], yourTimeObj);
 		MakeTwitch(yourTimeObj, kTwitchPreset_YourTimeReveal | kTwitchFlags_HideDuringDelay);
 
 
@@ -1753,10 +1764,10 @@ short	sex;
 		if (rankInScoreboard == 0
 			&& SumLapTimes(gScoreboard.records[gTrackNum][1].lapTimes) > 0)
 		{
-			textDef.coord.y += 32;
-			textDef.scale = .4;
+			textDef.coord.y += 32.0f * paneScale;
+			textDef.scale = .4f * paneScale;
 			ObjNode* newRecordObj = TextMesh_New(Localize(STR_NEW_RECORD), 0, &textDef);
-			AppendNodeToChain(gFinalPlaceObj, newRecordObj);
+			AppendNodeToChain(gFinalPlaceObj[playerNum], newRecordObj);
 			MakeTwitch(newRecordObj, kTwitchPreset_NewRecordReveal | kTwitchFlags_HideDuringDelay);
 		}
 	}
