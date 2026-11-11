@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.21)
 
 set(GAME_TARGET				"CroMagRally")
 set(GAME_FULL_NAME			"Cro-Mag Rally")
-set(GAME_VERSION			"4.0.1")
+set(GAME_VERSION			"4.1")
 set(GAME_IDENTIFIER			"io.jor.cromagrally")
 set(GAME_COPYRIGHT			"© 2000 Pangea Software, Inc., © 2025 Iliyas Jorio.")
 
@@ -18,6 +18,10 @@ set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Target macOS architectu
 project(${GAME_TARGET}
 	VERSION ${GAME_VERSION}
 	LANGUAGES C CXX)
+
+if(PROJECT_VERSION_PATCH STREQUAL "")
+	set(PROJECT_VERSION_PATCH 0)
+endif()
 
 option(BUILD_SDL_FROM_SOURCE "Build SDL from source" OFF)
 option(SDL_STATIC "Static link SDL" OFF)

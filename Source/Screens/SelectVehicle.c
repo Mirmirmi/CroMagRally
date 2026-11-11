@@ -69,6 +69,82 @@ static int		gNumVehiclesToChooseFrom;
 
 /******************* DO MULTIPLAYER VEHICLE SELECTIONS ********************/
 
+static void OnToggleMultiplayerCPUs(const MenuItem* item)
+{
+	(void)item;
+	LayoutCurrentMenuAgain();
+}
+
+static int GetMultiplayerDifficultyFlags(const MenuItem* item)
+{
+	(void)item;
+	return gMultiplayerCPUs ? 0 : (kMILayoutFlagHidden | kMILayoutFlagDisabled);
+}
+
+static void OnStartMultiplayerRace(const MenuItem* item)
+{
+	(void)item;
+	SavePrefs();
+	gNumTotalPlayers = gMultiplayerCPUs ? MAX_PLAYERS : gNumRealPlayers;
+	gGameView->fadePillarbox = true;
+	gGameView->fadeSound = true;
+	gGameView->fadeOutDuration = .3f;
+}
+
+static const MenuItem gMultiplayerRaceOptionsTree[] =
+{
+	{ .id = 'mprc' },
+	{
+		kMICycler1, STR_CPU_RACERS, .callback = OnToggleMultiplayerCPUs, .cycler =
+		{
+			.valuePtr = &gMultiplayerCPUs,
+			.choices =
+			{
+				{ STR_OFF, 0 },
+				{ STR_ON,  1 },
+			}
+		}
+	},
+	{
+		kMICycler1, STR_DIFFICULTY, .getLayoutFlags = GetMultiplayerDifficultyFlags, .cycler =
+		{
+			.valuePtr = &gGamePrefs.difficulty,
+			.choices =
+			{
+				{ STR_DIFFICULTY_1, DIFFICULTY_SIMPLISTIC },
+				{ STR_DIFFICULTY_2, DIFFICULTY_EASY },
+				{ STR_DIFFICULTY_3, DIFFICULTY_MEDIUM },
+				{ STR_DIFFICULTY_4, DIFFICULTY_HARD },
+			}
+		}
+	},
+	{ kMISpacer, .customHeight = .5f },
+	{ kMIPick, STR_START_RACE, .callback = OnStartMultiplayerRace, .id = 1, .next = 'EXIT' },
+	{ 0 },
+};
+
+static Boolean DoMultiplayerRaceOptionsScreen(void)
+{
+	OGLSetupInputType viewDef;
+	OGL_NewViewDef(&viewDef);
+	viewDef.view.pillarboxRatio = PILLARBOX_RATIO_4_3;
+	viewDef.view.fontName       = "rockfont";
+	OGL_SetupGameView(&viewDef);
+
+	MakeScrollingBackgroundPattern();
+	MakeFadeEvent(true);
+
+	MenuStyle style = kDefaultMenuStyle;
+	style.canBackOutOfRootMenu = true;
+
+	int pick = StartMenu(gMultiplayerRaceOptionsTree, &style, MoveObjects, DrawObjects);
+
+	DeleteAllObjects();
+	OGL_DisposeGameView();
+
+	return pick != 1;
+}
+
 Boolean DoMultiPlayerVehicleSelections(void)
 {
 	if (gNetGameInProgress)
@@ -84,45 +160,55 @@ Boolean DoMultiPlayerVehicleSelections(void)
 	{
 		short currentScreen = 0;
 		short screensPerPlayer = 2;
+		short totalHumanScreens = screensPerPlayer * gNumLocalPlayers;
 		bool bailed;
 
-		while (currentScreen < screensPerPlayer * gNumLocalPlayers)
+		while (1)
 		{
-			gCurrentPlayerNum = currentScreen / screensPerPlayer;
-			int screenToShow = currentScreen % screensPerPlayer;
-
-			switch (screenToShow)
+			while (currentScreen < totalHumanScreens)
 			{
-				case 0:
-					bailed = DoCharacterSelectScreen(gCurrentPlayerNum, true);
-					break;
+				gCurrentPlayerNum = currentScreen / screensPerPlayer;
+				int screenToShow = currentScreen % screensPerPlayer;
 
-				case 1:
-					bailed = DoVehicleSelectScreen(gCurrentPlayerNum, true);
-					break;
-
-				default:
-					DoFatalAlert("Unknown MP prep screen %d", screenToShow);
-			}
-
-			if (bailed)
-			{
-				if (currentScreen == 0)
+				switch (screenToShow)
 				{
-					return true;	// bail
+					case 0:
+						bailed = DoCharacterSelectScreen(gCurrentPlayerNum, true);
+						break;
+
+					case 1:
+						bailed = DoVehicleSelectScreen(gCurrentPlayerNum, true);
+						break;
+
+					default:
+						DoFatalAlert("Unknown MP prep screen %d", screenToShow);
+				}
+
+				if (bailed)
+				{
+					if (currentScreen == 0)
+					{
+						return true;	// bail
+					}
+					else
+					{
+						currentScreen--;
+					}
 				}
 				else
 				{
-					currentScreen--;
+					currentScreen++;
 				}
 			}
-			else
-			{
-				currentScreen++;
-			}
-		}
 
-		return false;
+			if (gGameMode == GAME_MODE_MULTIPLAYERRACE && DoMultiplayerRaceOptionsScreen())
+			{
+				currentScreen = totalHumanScreens - 1;
+				continue;
+			}
+
+			return false;
+		}
 	}
 }
 
@@ -176,7 +262,8 @@ Boolean DoVehicleSelectScreen(short whichPlayer, Boolean allowAborting)
 	{
 		gGameView->fadePillarbox = true;
 
-		if (whichPlayer == gNumRealPlayers-1)
+		if (whichPlayer == gNumRealPlayers-1 &&
+			(gGameMode != GAME_MODE_MULTIPLAYERRACE || gNetGameInProgress))
 		{
 			gGameView->fadeSound = true;
 			gGameView->fadeOutDuration = .3f;

@@ -527,6 +527,8 @@ static Boolean PlayGame_MultiplayerRace(void)
 	if (DoMultiPlayerVehicleSelections())
 		return true;
 
+	gNumTotalPlayers = gMultiplayerCPUs ? MAX_PLAYERS : gNumRealPlayers;
+
 
 			/* LOAD TRACK */
 
@@ -717,10 +719,13 @@ char	s[32];
 Boolean	done = false;
 ObjNode* bigArrowhead = NULL;
 
-	if (gFinalPlaceObj)
+	for (int i = 0; i < MAX_PLAYERS; i++)
 	{
-		DeleteObject(gFinalPlaceObj);
-		gFinalPlaceObj = nil;
+		if (gFinalPlaceObj[i])
+		{
+			DeleteObject(gFinalPlaceObj[i]);
+			gFinalPlaceObj[i] = nil;
+		}
 	}
 
 	stageTimer = 0;
