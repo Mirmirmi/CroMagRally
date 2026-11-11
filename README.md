@@ -4,7 +4,12 @@
 >
 > The section immediately below lists the changes made in this fork, followed by **[Jorio’s original README](#original-upstream-readme-by-iliyas-jorio)** preserved in full.
 
-## Changes in This Fork (`v4.0.1`)
+## Changes in This Fork (`v4.1`)
+
+### Multiplayer CPU Racers & Pre-Race Options (`v4.1`)
+- **CPU Grid Fill & Finish Condition:** Enables CPU racers to fill remaining slots up to 6 total racers in local split-screen Multiplayer Races (`GAME_MODE_MULTIPLAYERRACE`), ending the race when the first human player crosses the finish line and displaying per-player split-screen final standings via [`ShowFinalPlace()`](Source/Screens/Infobar.c).
+- **Pre-Race CPU & Difficulty Menu:** Adds [`DoMultiplayerRaceOptionsScreen()`](Source/Screens/SelectVehicle.c) after multiplayer human character/vehicle selections with a **CPU Racers** On/Off toggle (default On) and the **Difficulty** bone indicator below it, with Back navigation to the previous screen.
+- **Full CPU Vehicle Pool:** Allows multiplayer CPU racers to select randomly from all 11 land vehicles (`NUM_LAND_CAR_TYPES`), preventing duplicates below Hard difficulty.
 
 ### New Vehicle: **Scuttle-saur** (`CAR_TYPE_LIZARD`)
 - **Custom 3D Vehicle & Texture:** Adds a brand-new 11th land vehicle—the **Scuttle-saur**, a crested prehistoric reptile racer with a custom 3D mesh and 256×256 procedural scale texture packed into [`Data/Models/carparts.bg3d`](Data/Models/carparts.bg3d) and [`Data/Models/carselect.bg3d`](Data/Models/carselect.bg3d).
