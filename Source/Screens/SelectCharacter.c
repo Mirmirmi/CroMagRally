@@ -27,10 +27,11 @@ static void FreeCharacterSelectArt(void);
 /****************************/
 
 #define	ARROW_SCALE		.5
-#define ARROW_2D_SPREAD		276.0f
+#define CHAR_3D_SPREAD		84.0f
+#define ARROW_2D_SPREAD		193.0f
 #define ARROW_Y				204.0f
 
-#define GetCharacterArrowHomeX() (ARROW_2D_SPREAD * (gSelectedCharacterIndex - 0.5f))
+#define GetCharacterArrowHomeX() (ARROW_2D_SPREAD * (gSelectedCharacterIndex - 1))
 
 
 /*********************/
@@ -39,8 +40,22 @@ static void FreeCharacterSelectArt(void);
 
 static int		gSelectedCharacterIndex;
 
-static ObjNode	*gSex[2];
+static ObjNode	*gSex[NUM_PLAYER_CHARACTERS];
 static ObjNode	*gCharacterArrow;
+
+static const struct
+{
+	uint8_t		skelType;
+	LocStrID	nameStr;
+	float		x3d;
+	float		nameX2d;
+	float		rotY;
+} kCharacterSlots[NUM_PLAYER_CHARACTERS] =
+{
+	{ SKELETON_TYPE_MALESTANDING,   STR_BROG,  -CHAR_3D_SPREAD, -ARROW_2D_SPREAD, PI },
+	{ SKELETON_TYPE_FEMALESTANDING, STR_GRAG,   0.0f,            0.0f,            PI },
+	{ SKELETON_TYPE_CHASESTANDING,  STR_CHASE,  CHAR_3D_SPREAD,  ARROW_2D_SPREAD, PI - 0.50f },
+};
 
 
 /********************** DO CHARACTER SELECT SCREEN **************************/
@@ -152,8 +167,8 @@ ObjNode	*multiplayerText = NULL;
 
 			/* LOAD SKELETONS */
 
-	LoadASkeleton(SKELETON_TYPE_MALESTANDING);
-	LoadASkeleton(SKELETON_TYPE_FEMALESTANDING);
+	for (int i = 0; i < NUM_PLAYER_CHARACTERS; i++)
+		LoadASkeleton(kCharacterSlots[i].skelType);
 
 
 
@@ -182,36 +197,33 @@ ObjNode	*multiplayerText = NULL;
 
 		NewObjectDefinitionType newObjDef_NameString =
 		{
-			.coord = {-0.5f*ARROW_2D_SPREAD, -192, 0},
+			.coord = {0, -192, 0},
 			.scale = .6f,
 			.slot = 99
 		};
-		TextMesh_New(Localize(STR_BROG), kTextMeshAlignCenter, &newObjDef_NameString);
-
-		newObjDef_NameString.coord.x 	= 0.5f*ARROW_2D_SPREAD;
-		TextMesh_New(Localize(STR_GRAG), kTextMeshAlignCenter, &newObjDef_NameString);
+		for (int i = 0; i < NUM_PLAYER_CHARACTERS; i++)
+		{
+			newObjDef_NameString.coord.x = kCharacterSlots[i].nameX2d;
+			TextMesh_New(Localize(kCharacterSlots[i].nameStr), kTextMeshAlignCenter, &newObjDef_NameString);
+		}
 	}
 
 
-			/* CREATE MALE CHARACTER */
+			/* CREATE SELECTABLE CHARACTERS */
 
-	NewObjectDefinitionType newObjDef_Character =
+	for (int i = 0; i < NUM_PLAYER_CHARACTERS; i++)
 	{
-		.type = SKELETON_TYPE_MALESTANDING,
-		.animNum = 1,
-		.coord = {-60, 0, 0},
-		.slot = 100,
-		.rot = PI,
-		.scale = .5f
-	};
-	gSex[0] = MakeNewSkeletonObject(&newObjDef_Character);
-
-			/* CREATE FEMALE CHARACTER */
-
-	newObjDef_Character.type 		= SKELETON_TYPE_FEMALESTANDING;
-	newObjDef_Character.coord.x 	= -newObjDef_Character.coord.x;
-	newObjDef_Character.animNum	= 0;
-	gSex[1] = MakeNewSkeletonObject(&newObjDef_Character);
+		NewObjectDefinitionType newObjDef_Character =
+		{
+			.type = kCharacterSlots[i].skelType,
+			.animNum = (i == gSelectedCharacterIndex) ? 1 : 0,
+			.coord = {kCharacterSlots[i].x3d, 0, 0},
+			.slot = 100,
+			.rot = kCharacterSlots[i].rotY,
+			.scale = .5f
+		};
+		gSex[i] = MakeNewSkeletonObject(&newObjDef_Character);
+	}
 
 			/* CREATE ARROW */
 
@@ -320,6 +332,13 @@ static void CycleSkin(short whichPlayer, int delta)
 }
 
 
+static void UpdateSelectedCharacterAnim(void)
+{
+	for (int i = 0; i < NUM_PLAYER_CHARACTERS; i++)
+		MorphToSkeletonAnim(gSex[i]->Skeleton, (i == gSelectedCharacterIndex) ? 1 : 0, 5.0);
+}
+
+
 /***************** DO CHARACTERSELECT CONTROLS *******************/
 
 static Boolean DoCharacterSelectControls(short whichPlayer, Boolean allowAborting)
@@ -363,25 +382,23 @@ short	p;
 	{
 		PlayEffect(EFFECT_SELECTCLICK);
 		gSelectedCharacterIndex--;
-		MorphToSkeletonAnim(gSex[0]->Skeleton, 1, 5.0);
-		MorphToSkeletonAnim(gSex[1]->Skeleton, 0, 5.0);
+		UpdateSelectedCharacterAnim();
 		gCharacterArrow->Coord.x = GetCharacterArrowHomeX();
 		MakeTwitch(gCharacterArrow, kTwitchPreset_DisplaceRTL);
 	}
 	else
-	if (GetNewNeedState(kNeed_UIRight, p) && (gSelectedCharacterIndex < 1))
+	if (GetNewNeedState(kNeed_UIRight, p) && (gSelectedCharacterIndex < NUM_PLAYER_CHARACTERS - 1))
 	{
 		PlayEffect(EFFECT_SELECTCLICK);
 		gSelectedCharacterIndex++;
-		MorphToSkeletonAnim(gSex[0]->Skeleton, 0, 5.0);
-		MorphToSkeletonAnim(gSex[1]->Skeleton, 1, 5.0);
+		UpdateSelectedCharacterAnim();
 		gCharacterArrow->Coord.x = GetCharacterArrowHomeX();
 		MakeTwitch(gCharacterArrow, kTwitchPreset_DisplaceLTR);
 	}
 	else
 	if (GetNewNeedState(kNeed_UIUp, p))
 	{
-		if (gGameMode != GAME_MODE_CAPTUREFLAG)
+		if (gGameMode != GAME_MODE_CAPTUREFLAG && gSelectedCharacterIndex < 2)
 		{
 			PlayEffect_Parms(EFFECT_SELECTCLICK, FULL_CHANNEL_VOLUME, FULL_CHANNEL_VOLUME, NORMAL_CHANNEL_RATE * 0.7f);
 			CycleSkin(whichPlayer, 1);
@@ -394,7 +411,7 @@ short	p;
 	else
 	if (GetNewNeedState(kNeed_UIDown, p))
 	{
-		if (gGameMode != GAME_MODE_CAPTUREFLAG)
+		if (gGameMode != GAME_MODE_CAPTUREFLAG && gSelectedCharacterIndex < 2)
 		{
 			PlayEffect_Parms(EFFECT_SELECTCLICK, FULL_CHANNEL_VOLUME, FULL_CHANNEL_VOLUME, NORMAL_CHANNEL_RATE * 0.7f);
 			CycleSkin(whichPlayer, -1);

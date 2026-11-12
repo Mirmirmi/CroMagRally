@@ -121,6 +121,7 @@ static const EffectDef kEffectsTable[NUM_EFFECTS] =
 	[EFFECT_THROW1]             = {SOUNDBANK_MAIN,				"Throw1",				2000},
 	[EFFECT_THROW2]             = {SOUNDBANK_MAIN,				"Throw2",				2000},
 	[EFFECT_THROW3]             = {SOUNDBANK_MAIN,				"Throw3",				2000},
+	[EFFECT_THROW_CHASE]        = {SOUNDBANK_MAIN,				"ThrowChase",			2000},
 	[EFFECT_DUSTDEVIL]          = {SOUNDBANK_LEVELSPECIFIC,		"DustDevil",			2000},
 	[EFFECT_BLOWDART]           = {SOUNDBANK_LEVELSPECIFIC,		"BlowDart",				2000},
 	[EFFECT_HITSNOW]            = {SOUNDBANK_LEVELSPECIFIC,		"HitSnow",				2000},

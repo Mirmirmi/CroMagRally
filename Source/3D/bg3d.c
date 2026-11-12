@@ -16,6 +16,7 @@
 #include "window.h"
 #include "skeletonobj.h"
 #include "mobjtypes.h"
+#include <SDL3/SDL.h>
 
 
 /****************************/
@@ -869,6 +870,42 @@ int					n,i;
 	{
 		mat = va->materials[i];							// get pointer to material
 		mat->objectData.flags |= flags;					// set flags
+	}
+}
+
+/******************* UPDATE POLICE SIREN LIGHTS ******************/
+
+void UpdatePoliceSirenLights(int groupNum)
+{
+	BG3DFileContainer *container = gBG3DContainerList[groupNum];
+	if (!container)
+		return;
+
+	/* Alternating double-pulse emergency strobe (red left / blue right) */
+	uint64_t ms = SDL_GetTicks() % 560;
+	Boolean redOn  = (ms < 100) || (ms >= 150 && ms < 250);
+	Boolean blueOn = (ms >= 280 && ms < 380) || (ms >= 430 && ms < 530);
+
+	int emissiveIdx = 0;
+	for (int i = 0; i < container->numMaterials; i++)
+	{
+		MOMaterialObject *mat = container->materials[i];
+		if (!mat || !(mat->objectData.flags & BG3D_MATERIALFLAG_EMISSIVE))
+			continue;
+
+		if (emissiveIdx == 0)
+		{
+			mat->objectData.diffuseColor = redOn
+				? (OGLColorRGBA){1.0f, 0.14f, 0.14f, 1.0f}
+				: (OGLColorRGBA){0.26f, 0.03f, 0.04f, 1.0f};
+		}
+		else
+		{
+			mat->objectData.diffuseColor = blueOn
+				? (OGLColorRGBA){0.15f, 0.58f, 1.0f, 1.0f}
+				: (OGLColorRGBA){0.03f, 0.10f, 0.28f, 1.0f};
+		}
+		emissiveIdx++;
 	}
 }
 

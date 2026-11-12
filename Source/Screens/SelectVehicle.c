@@ -340,9 +340,10 @@ int					age;
 		gBoneMeters[i] = nil;
 
 	age = GetNumAgesCompleted();
-	if (age > 2)											// prevent extra cars after winning Iron Age
-		age = 2;
-	gNumVehiclesToChooseFrom = 7 + (age * 2);				// set # cars we can pick from
+	if (age >= 3)											// completing Iron Age unlocks Police Cruiser
+		gNumVehiclesToChooseFrom = NUM_LAND_CAR_TYPES;
+	else
+		gNumVehiclesToChooseFrom = 7 + (age * 2);			// set # cars we can pick from
 
 	if ((gNumRealPlayers > 1) || IsBattleGameMode(gGameMode))	// let use any car in multiplayer/battle modes
 		gNumVehiclesToChooseFrom = NUM_LAND_CAR_TYPES;
@@ -688,6 +689,8 @@ short	p;
 
 static void MoveCarModel(ObjNode *theNode)
 {
+	if (theNode->Type == CAR_TYPE_POLICE)
+		UpdatePoliceSirenLights(MODEL_GROUP_CARSELECT);
 	theNode->Rot.y += gFramesPerSecondFrac * 1.5f;
 	UpdateObjectTransforms(theNode);
 }

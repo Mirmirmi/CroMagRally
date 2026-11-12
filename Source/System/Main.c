@@ -297,7 +297,7 @@ select_track:
 select_sex:
 	if (gIsSelfRunningDemo)									// auto-pick if SRD
 	{
-		gPlayerInfo[0].sex = MyRandomLong() & 1;
+		gPlayerInfo[0].sex = MyRandomLong() % NUM_PLAYER_CHARACTERS;
 
 		switch (GetNumAgesCompleted())
 		{
@@ -309,8 +309,12 @@ select_sex:
 					gPlayerInfo[0].vehicleType = RandomRange(0, 7);
 					break;
 
-			default:
+			case	2:
 					gPlayerInfo[0].vehicleType = RandomRange(0, 9);
+					break;
+
+			default:
+					gPlayerInfo[0].vehicleType = RandomRange(0, NUM_LAND_CAR_TYPES - 1);
 					break;
 		}
 		gAutoPilot = true;									// set auto-pilot so computer will play for us in SRD mode

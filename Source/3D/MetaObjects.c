@@ -673,12 +673,20 @@ use_current:
 			/* DRAW IT */
 			/***********/
 
+	Boolean emissiveUnlit = (data->numMaterials > 0) &&
+		(data->materials[0]->objectData.flags & BG3D_MATERIALFLAG_EMISSIVE) &&
+		gMyState_Lighting;
+	if (emissiveUnlit)
+		glDisable(GL_LIGHTING);
 
 //	glLockArraysEXT(0, data->numPoints);
 	glDrawElements(GL_TRIANGLES,data->numTriangles*3,GL_UNSIGNED_INT,&data->triangles[0]);
 	if (OGL_CheckError())
 		DoFatalAlert("MO_DrawGeometry_VertexArray: glDrawElements");
 //	glUnlockArraysEXT();
+
+	if (emissiveUnlit)
+		glEnable(GL_LIGHTING);
 
 	gPolysThisFrame += data->numPoints;					// inc poly counter
 }

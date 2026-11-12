@@ -119,6 +119,7 @@ static const char* kSkeletonNames[MAX_SKELETON_TYPES] =
 {
 	[SKELETON_TYPE_PLAYER_MALE]		= "Brog",
 	[SKELETON_TYPE_PLAYER_FEMALE]	= "Grag",
+	[SKELETON_TYPE_PLAYER_CHASE]	= "Chase",
 	[SKELETON_TYPE_BIRDBOMB]		= "BirdBomb",
 	[SKELETON_TYPE_YETI]			= "Yeti",
 	[SKELETON_TYPE_BEETLE]			= "Beetle",
@@ -130,6 +131,7 @@ static const char* kSkeletonNames[MAX_SKELETON_TYPES] =
 	[SKELETON_TYPE_PTERADACTYL]		= "Pterodactyl",
 	[SKELETON_TYPE_MALESTANDING]	= "BrogStanding",
 	[SKELETON_TYPE_FEMALESTANDING]	= "GragStanding",
+	[SKELETON_TYPE_CHASESTANDING]	= "ChaseStanding",
 	[SKELETON_TYPE_DRAGON]			= "Dragon",
 	[SKELETON_TYPE_MUMMY]			= "Mummy",
 	[SKELETON_TYPE_TROLL]			= "Troll",
@@ -844,6 +846,7 @@ static const char*	levelModelFiles[NUM_TRACKS] =
 
 	LoadASkeleton(SKELETON_TYPE_PLAYER_MALE);
 	LoadASkeleton(SKELETON_TYPE_PLAYER_FEMALE);
+	LoadASkeleton(SKELETON_TYPE_PLAYER_CHASE);
 
 	LoadASkeleton(SKELETON_TYPE_BIRDBOMB);
 

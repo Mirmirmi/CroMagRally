@@ -489,6 +489,7 @@ OGLSetupInputType	viewDef;
 
 	LoadASkeleton(SKELETON_TYPE_MALESTANDING);
 	LoadASkeleton(SKELETON_TYPE_FEMALESTANDING);
+	LoadASkeleton(SKELETON_TYPE_CHASESTANDING);
 
 
 			/* LOAD MODELS */
@@ -541,7 +542,9 @@ OGLSetupInputType	viewDef;
 	{
 		NewObjectDefinitionType def =
 		{
-			.type		= SKELETON_TYPE_MALESTANDING,
+			.type		= (gPlayerInfo[0].sex == 2) ? SKELETON_TYPE_CHASESTANDING :
+						  (gPlayerInfo[0].sex == 1) ? SKELETON_TYPE_FEMALESTANDING :
+													  SKELETON_TYPE_MALESTANDING,
 			.animNum	= 2,
 			.coord		= {-900, 120, -200},
 			.flags		= 0,

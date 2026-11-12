@@ -201,6 +201,9 @@ static void PlayerThrowsWeapon(short playerNum, Boolean forwardThrow)
 		else
 			MorphToSkeletonAnim(head->Skeleton, PLAYER_ANIM_THROWBACKWARD, 8.0);
 
+		if (pinfo->sex == 2)
+			PlayEffect_Parms3D(EFFECT_THROW_CHASE, &gCoord, NORMAL_CHANNEL_RATE, 1.5);
+		else
 		if (pinfo->sex)
 			PlayEffect_Parms3D(EFFECT_THROW1 + RandomRange(0,2), &gCoord, NORMAL_CHANNEL_RATE + 0x5000, 1.5);
 		else

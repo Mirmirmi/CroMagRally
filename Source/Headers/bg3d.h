@@ -44,7 +44,8 @@ enum
 	BG3D_MATERIALFLAG_TEXTURED		= 	1,
 	BG3D_MATERIALFLAG_ALWAYSBLEND	=	(1<<1),	// set if always want to GL_BLEND this texture when drawn
 	BG3D_MATERIALFLAG_CLAMP_U		=	(1<<2),
-	BG3D_MATERIALFLAG_CLAMP_V		=	(1<<3)
+	BG3D_MATERIALFLAG_CLAMP_V		=	(1<<3),
+	BG3D_MATERIALFLAG_EMISSIVE		=	(1<<4)
 
 };
 
@@ -109,3 +110,4 @@ void ImportBG3D(FSSpec *spec, int groupNum);
 void DisposeBG3DContainer(int groupNum);
 void DisposeAllBG3DContainers(void);
 void BG3D_SetContainerMaterialFlags(short group, short type, uint32_t flags);
+void UpdatePoliceSirenLights(int groupNum);

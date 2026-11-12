@@ -55,7 +55,7 @@ short	i;
 	{
 		gPlayerInfo[i].objNode			= nil;
 
-		gPlayerInfo[i].sex 				= i&1;			// altername male/female
+		gPlayerInfo[i].sex 				= i % NUM_PLAYER_CHARACTERS;
 
 		gPlayerInfo[i].startX 			= 0;
 		gPlayerInfo[i].startZ 			= 0;
@@ -218,9 +218,10 @@ uint32_t mpVehicleRng = (uint32_t)SDL_GetPerformanceCounter() | 1u;
 
 
 	i = GetNumAgesCompleted();
-	if (i > 2)														// dont get extra cars after winning, so pin @ 2
-		i = 2;
-	type = 7 + (i * 2)-1;											// start @ end of usable cars so it will pick best cars
+	if (i >= 3)														// completing Iron Age unlocks all land vehicles
+		type = NUM_LAND_CAR_TYPES - 1;
+	else
+		type = 7 + (i * 2)-1;										// start @ end of usable cars so it will pick best cars
 
 
 			/* SET SOME GLOBALS */
