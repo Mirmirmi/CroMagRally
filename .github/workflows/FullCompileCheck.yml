@@ -1,30 +1,68 @@
 name: Full Compile Check
 
-on: [workflow_dispatch]
+on:
+  workflow_dispatch:
+  push:
+    branches-ignore:
+      - master
+  pull_request:
+    branches:
+      - master
+
+concurrency:
+  group: full-compile-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  full-compile-check:
+  asset-check:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run asset and metadata checks
+        run: python3 .github/scripts/check_assets.py
+
+  compile-check:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
     name: ${{ matrix.platform.name }}
     runs-on: ${{ matrix.platform.os }}
-    timeout-minutes: 5
+    timeout-minutes: 20
 
     strategy:
       fail-fast: false
       matrix:
         platform:
-          - { name: Linux/GCC, os: ubuntu-latest, extraflags: "--system-sdl" }
-          - { name: Linux/Clang, os: ubuntu-latest, extraflags: "--system-sdl", prefix: "CC=clang CXX=clang++"}
-          - { name: Windows/VS2022, os: windows-2022, extraflags: "-G 'Visual Studio 17 2022'" }
-          - { name: Mac, os: macos-latest }
+          - { name: Linux/x86_64 (GCC), os: ubuntu-22.04 }
+          - { name: Linux/x86_64 (Clang), os: ubuntu-22.04, cc: clang, cxx: clang++ }
+          - { name: Linux/aarch64 Raspberry Pi (GCC), os: ubuntu-22.04-arm }
+          - { name: Windows/x64 (VS2022), os: windows-2022 }
+          - { name: macOS/Universal, os: macos-latest }
 
     steps:
-      - name: Install Linux build dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt update
-          sudo apt install libsdl3-dev
-
       - uses: actions/checkout@v4
-        with: {submodules: 'recursive'}
-          
-      - run: ${{matrix.platform.prefix}} python3 build.py --dependencies --configure --build ${{matrix.platform.extraflags}}
+        with:
+          submodules: recursive
+
+      - name: Setup Linux SDL3 dependencies
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/setup-linux-sdl
+
+      - name: Ensure Clang is installed
+        if: runner.os == 'Linux' && matrix.platform.cc == 'clang'
+        run: command -v clang >/dev/null 2>&1 || sudo apt-get install -y clang
+
+      - name: Prepare dependencies (Windows / macOS)
+        if: runner.os != 'Linux'
+        run: python3 build.py --dependencies
+
+      - name: Configure and build (Unix / Clang)
+        if: runner.os != 'Windows' && matrix.platform.cc
+        env:
+          CC: ${{ matrix.platform.cc }}
+          CXX: ${{ matrix.platform.cxx }}
+        run: python3 build.py --configure --build
+
+      - name: Configure and build (Default compiler)
+        if: "!matrix.platform.cc"
+        run: python3 build.py --configure --build
