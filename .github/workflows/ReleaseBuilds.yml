@@ -13,16 +13,93 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  bump-version:
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/master' &&
+      !startsWith(github.event.head_commit.message, 'Bump version to ')
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: read
+    outputs:
+      target_ref: ${{ steps.bump.outputs.target_ref }}
+      release_tag: ${{ steps.bump.outputs.release_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine and bump version
+        id: bump
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          COMMIT_SHA: ${{ github.sha }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+          git fetch origin master --tags
+          git checkout -B master origin/master
+
+          CUR_VER="$(python3 .github/scripts/bump_version.py --print-current)"
+          TARGET_SHA="$(git rev-parse HEAD)"
+
+          LABELS="$(gh api "repos/${REPO}/commits/${COMMIT_SHA}/pulls" --jq '[.[].labels[].name] | join("\n")' 2>/dev/null || true)"
+          if grep -qx 'skip-bump' <<<"$LABELS" || grep -qF '[skip bump]' <<<"$COMMIT_MSG"; then
+            echo "Skipping version bump as requested."
+            echo "target_ref=${TARGET_SHA}" >> "$GITHUB_OUTPUT"
+            echo "release_tag=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # If this version hasn't been tagged as a release yet (e.g. initial v5.0),
+          # build and release it directly without double-incrementing.
+          if ! git rev-parse -q --verify "refs/tags/v${CUR_VER}" >/dev/null; then
+            echo "Tag v${CUR_VER} does not exist yet; releasing ${CUR_VER}."
+            echo "target_ref=${TARGET_SHA}" >> "$GITHUB_OUTPUT"
+            echo "release_tag=v${CUR_VER}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          MODE="patch"
+          if grep -qx 'bump:major' <<<"$LABELS" || grep -qF '[major]' <<<"$COMMIT_MSG"; then
+            MODE="major"
+          elif grep -qx 'bump:minor' <<<"$LABELS" || grep -qF '[minor]' <<<"$COMMIT_MSG"; then
+            MODE="minor"
+          fi
+
+          NEW_VER="$(python3 .github/scripts/bump_version.py --mode "$MODE")"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CMakeLists.txt Source/Headers/version.h
+          git commit -m "Bump version to ${NEW_VER} [skip ci]"
+          git push origin HEAD:master
+
+          NEW_SHA="$(git rev-parse HEAD)"
+          echo "Bumped version ${CUR_VER} -> ${NEW_VER} (${NEW_SHA})"
+          echo "target_ref=${NEW_SHA}" >> "$GITHUB_OUTPUT"
+          echo "release_tag=v${NEW_VER}" >> "$GITHUB_OUTPUT"
+
   asset-check:
+    needs: bump-version
+    if: ${{ !cancelled() && (needs.bump-version.result == 'success' || needs.bump-version.result == 'skipped') }}
     runs-on: ubuntu-22.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.bump-version.outputs.target_ref || github.sha }}
       - name: Run asset and metadata checks
         run: python3 .github/scripts/check_assets.py
 
   build-linux-appimage:
-    needs: asset-check
+    needs: [bump-version, asset-check]
+    if: >-
+      ${{ !cancelled() &&
+      (needs.bump-version.result == 'success' || needs.bump-version.result == 'skipped') &&
+      needs.asset-check.result == 'success' }}
     name: Linux (${{ matrix.platform.name }})
     runs-on: ${{ matrix.platform.os }}
     timeout-minutes: 20
@@ -37,6 +114,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.bump-version.outputs.target_ref || github.sha }}
           submodules: recursive
       - uses: ./.github/actions/setup-linux-sdl
       - run: echo "ARTIFACT_NAME=$(python3 build.py --print-artifact-name)" >> "$GITHUB_ENV"
@@ -49,13 +127,18 @@ jobs:
           retention-days: 14
 
   build-windows:
-    needs: asset-check
+    needs: [bump-version, asset-check]
+    if: >-
+      ${{ !cancelled() &&
+      (needs.bump-version.result == 'success' || needs.bump-version.result == 'skipped') &&
+      needs.asset-check.result == 'success' }}
     name: Windows (x64)
     runs-on: windows-2022
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.bump-version.outputs.target_ref || github.sha }}
           submodules: recursive
       - run: |
           $ARTIFACT_NAME = python3 build.py --print-artifact-name
@@ -69,13 +152,18 @@ jobs:
           retention-days: 14
 
   build-macos:
-    needs: asset-check
+    needs: [bump-version, asset-check]
+    if: >-
+      ${{ !cancelled() &&
+      (needs.bump-version.result == 'success' || needs.bump-version.result == 'skipped') &&
+      needs.asset-check.result == 'success' }}
     name: macOS (Universal)
     runs-on: macos-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.bump-version.outputs.target_ref || github.sha }}
           submodules: recursive
       - run: echo "ARTIFACT_NAME=$(python3 build.py --print-artifact-name)" >> "$GITHUB_ENV"
       - run: python3 build.py --dependencies --configure --build --package
@@ -87,8 +175,14 @@ jobs:
           retention-days: 14
 
   publish-release:
-    needs: [build-linux-appimage, build-windows, build-macos]
-    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [bump-version, build-linux-appimage, build-windows, build-macos]
+    if: >-
+      ${{ !cancelled() &&
+      (needs.bump-version.result == 'success' || needs.bump-version.result == 'skipped') &&
+      needs.build-linux-appimage.result == 'success' &&
+      needs.build-windows.result == 'success' &&
+      needs.build-macos.result == 'success' &&
+      (startsWith(github.ref, 'refs/tags/v') || needs.bump-version.outputs.release_tag != '') }}
     name: Publish GitHub Release
     runs-on: ubuntu-22.04
     timeout-minutes: 10
@@ -102,13 +196,15 @@ jobs:
       - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ needs.bump-version.outputs.release_tag || github.ref_name }}
+          TARGET_SHA: ${{ needs.bump-version.outputs.target_ref || github.sha }}
         run: |
           ls -lh release-artifacts/
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" release-artifacts/* --clobber
           else
             gh release create "$TAG" release-artifacts/* \
+              --target "$TARGET_SHA" \
               --title "Cro-Mag Rally $TAG" \
               --generate-notes
           fi
