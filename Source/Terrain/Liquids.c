@@ -360,7 +360,7 @@ float				y;
 			// then a collision will be detected.
 			//
 
-	newObj->CType = CTYPE_LIQUID|CTYPE_BLOCKCAMERA;
+	newObj->CType = CTYPE_LIQUID|CTYPE_BLOCKCAMERA|CTYPE_AVOID;
 	newObj->CBits = CBITS_TOUCHABLE;
 
 	CreateCollisionBoxFromBoundingBox(newObj,1,1);

@@ -1400,6 +1400,8 @@ short				numPanes;
 			//
 
 	LoadLevelArt();
+	if (IsBattleGameMode(gGameMode))
+		BattleNav_LoadForTrack(gTrackNum);
 	InitInfobar();
 
 
@@ -1440,6 +1442,7 @@ static void CleanupLevel(void)
 	FreeAllSkeletonFiles(-1);
 	DisposeSuperTileMemoryList();
 	DisposeTerrain();
+	BattleNav_Dispose();
 	DeleteAllParticleGroups();
 	DisposeFences();
 
@@ -1455,6 +1458,16 @@ static void CleanupLevel(void)
 
 
 /*************** UPDATE GAME MODE SPECIFICS **********************/
+
+static Boolean AreAnyHumansAlive(void)
+{
+	for (short p = 0; p < gNumTotalPlayers; p++)
+	{
+		if (!gPlayerInfo[p].isComputer && !gPlayerInfo[p].isEliminated)
+			return(true);
+	}
+	return(false);
+}
 
 static void UpdateGameModeSpecifics(void)
 {
@@ -1481,7 +1494,7 @@ short	i,t,winner;
 					gPlayerInfo[gWhoIsIt].isEliminated = true;
 
 					gNumPlayersEliminated++;
-					if (gNumPlayersEliminated == (gNumTotalPlayers-1))		// if all players eliminated except 1 then we're done!
+					if (gNumPlayersEliminated >= (gNumTotalPlayers-1))		// if all players eliminated except 1 then we're done!
 					{
 							/* GAME IS DONE */
 
@@ -1501,6 +1514,16 @@ short	i,t,winner;
 							else
 								ShowWinLose(i, 1, winner);					// won!
 						}
+					}
+					else if (!AreAnyHumansAlive())
+					{
+							/* ALL HUMANS ELIMINATED: END MATCH IMMEDIATELY */
+
+						gTrackCompleted = true;
+						gTrackCompletedCoolDownTimer = TRACK_COMPLETE_COOLDOWN_TIME;
+
+						for (i = 0; i < gNumTotalPlayers; i++)
+							ShowWinLose(i, 2, -1);
 					}
 
 							/* ELIMINATE THIS PLAYER AND CHOOSE ANOTHER */
@@ -1554,16 +1577,23 @@ short	i,t,winner;
 					gPlayerInfo[i].impactResetTimer -= gFramesPerSecondFrac;
 				}
 
-				if (gNumPlayersEliminated == (gNumTotalPlayers-1))		// if all players eliminated except 1 then we're done!
+				if ((gNumPlayersEliminated >= (gNumTotalPlayers-1)) || !AreAnyHumansAlive())		// if all players eliminated except 1, or all humans died
 				{
 						/* GAME IS DONE */
 
 					gTrackCompleted = true;
 					gTrackCompletedCoolDownTimer = TRACK_COMPLETE_COOLDOWN_TIME;
 
-					for (winner = 0; winner < gNumTotalPlayers; winner++)
-						if (!gPlayerInfo[winner].isEliminated)			// scan for the winner
-							break;
+					if (gNumPlayersEliminated >= (gNumTotalPlayers-1))
+					{
+						for (winner = 0; winner < gNumTotalPlayers; winner++)
+							if (!gPlayerInfo[winner].isEliminated)			// scan for the winner
+								break;
+					}
+					else
+					{
+						winner = gNumTotalPlayers;
+					}
 
 
 								/* NOBODY WON */

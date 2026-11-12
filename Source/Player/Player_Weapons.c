@@ -770,6 +770,12 @@ short		p,bestP;
 		if (p == playerNum)													// dont attack the thrower!
 			continue;
 
+		if (gPlayerInfo[p].isEliminated)
+			continue;
+
+		if ((gGameMode == GAME_MODE_CAPTUREFLAG) && (gPlayerInfo[p].team == gPlayerInfo[playerNum].team))
+			continue;
+
 
 			/* SEE IF AHEAD */
 

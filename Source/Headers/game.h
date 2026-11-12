@@ -27,6 +27,8 @@
 #include "bg3d.h"
 #include "fences.h"
 #include "paths.h"
+#include "battlenav.h"
+#include "battleai.h"
 #include "sobjtypes.h"
 #include "metaobjects.h"
 #include "sprites.h"

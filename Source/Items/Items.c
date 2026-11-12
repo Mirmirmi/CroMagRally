@@ -1508,7 +1508,7 @@ short	type = itemPtr->parm[0];
 
 			/* SET COLLISION STUFF */
 
-	newObj->CType 			= CTYPE_MISC;
+	newObj->CType 			= CTYPE_MISC|CTYPE_AVOID;
 	newObj->CBits			= CBITS_ALLSOLID;
 
 	switch(type)

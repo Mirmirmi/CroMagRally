@@ -102,6 +102,10 @@ static const MenuItem gMainMenuTree[] =
 	{ .id='spgm' },
 	{kMIPick, STR_PRACTICE,		.callback=OnPickGameMode, .id=GAME_MODE_PRACTICE,			.next='EXIT' },
 	{kMIPick, STR_TOURNAMENT,	.callback=OnPickGameMode, .id=GAME_MODE_TOURNAMENT,			.next='tour' },
+	{kMIPick, STR_TAG1,			.callback=OnPickGameMode, .id=GAME_MODE_TAG1,				.next='tag1' },
+	{kMIPick, STR_TAG2,			.callback=OnPickGameMode, .id=GAME_MODE_TAG2,				.next='tag2' },
+	{kMIPick, STR_SURVIVAL,		.callback=OnPickGameMode, .id=GAME_MODE_SURVIVAL,			.next='EXIT' },
+	{kMIPick, STR_CAPTUREFLAG,	.callback=OnPickGameMode, .id=GAME_MODE_CAPTUREFLAG,		.next='EXIT' },
 
 	{ .id='tour' },
 	{kMILabel, .text=STR_TOURNAMENT_OBJECTIVE,		.getLayoutFlags=GetLayoutFlagsForTournamentObjective },
