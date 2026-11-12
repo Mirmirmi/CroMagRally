@@ -3,12 +3,8 @@ name: Full Compile Check
 on:
   workflow_dispatch:
   push:
-    branches:
-      - '**'
     branches-ignore:
       - master
-    tags-ignore:
-      - '**'
   pull_request:
     branches:
       - master
