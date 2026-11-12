@@ -206,7 +206,7 @@ static const float bottomOffsets[NUM_LAND_CAR_TYPES] =
 	[CAR_TYPE_GEODE]       = -94,
 	[CAR_TYPE_LOG]         = -99,
 	[CAR_TYPE_TURTLE]      = -63,
-	[CAR_TYPE_LIZARD]      = -54,
+	[CAR_TYPE_LIZARD]      = -68,
 	[CAR_TYPE_ROCK]        = -89,
 	[CAR_TYPE_TROJANHORSE] = -127,
 	[CAR_TYPE_OBELISK]     = -107,
@@ -221,7 +221,7 @@ static const float shadowScale[NUM_LAND_CAR_TYPES] =
 	[CAR_TYPE_GEODE]       = 12.0,
 	[CAR_TYPE_LOG]         = 11.5,
 	[CAR_TYPE_TURTLE]      = 10.5,
-	[CAR_TYPE_LIZARD]      = 11.5,
+	[CAR_TYPE_LIZARD]      = 13.5,
 	[CAR_TYPE_ROCK]        = 9.0,
 	[CAR_TYPE_TROJANHORSE] = 12.0,
 	[CAR_TYPE_OBELISK]     = 11.0,
@@ -3306,7 +3306,7 @@ static const OGLPoint3D	wheelOffsets[NUM_LAND_CAR_TYPES][4] =
 	[CAR_TYPE_OBELISK]     = { {-111,-58,-89},	{111,-58,-89},	{112,-38,79},	{-112,-38,79} },
 	[CAR_TYPE_CATAPULT]    = { {-108,-38,-109},	{108,-38,-109},	{112,-10,105},	{-112,-10,105} },
 	[CAR_TYPE_CHARIOT]     = { {-122,-28,-80},	{122,-28,-80},	{122,-2,85},	{-122,-2,85} },
-	[CAR_TYPE_LIZARD]      = { {-74,-14,-72},	{74,-14,-72},	{68,-10,64},	{-68,-10,64} },
+	[CAR_TYPE_LIZARD]      = { {-92,-16,-78},	{92,-16,-78},	{86,-12,70},	{-86,-12,70} },
 };
 
 
@@ -3322,7 +3322,7 @@ static const OGLPoint3D	headOffsets[NUM_LAND_CAR_TYPES] =
 	[CAR_TYPE_OBELISK]     = { 0, 85, 22 },
 	[CAR_TYPE_CATAPULT]    = { 0, 85, 10 },
 	[CAR_TYPE_CHARIOT]     = { 0, 85, 10 },
-	[CAR_TYPE_LIZARD]      = { 0, 58, 5 },
+	[CAR_TYPE_LIZARD]      = { 0, 74, 5 },
 };
 
 
