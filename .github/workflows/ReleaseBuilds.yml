@@ -196,14 +196,16 @@ jobs:
       - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
           TAG: ${{ needs.bump-version.outputs.release_tag || github.ref_name }}
           TARGET_SHA: ${{ needs.bump-version.outputs.target_ref || github.sha }}
         run: |
           ls -lh release-artifacts/
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" release-artifacts/* --clobber
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            gh release upload "$TAG" release-artifacts/* --repo "$REPO" --clobber
           else
             gh release create "$TAG" release-artifacts/* \
+              --repo "$REPO" \
               --target "$TARGET_SHA" \
               --title "Cro-Mag Rally $TAG" \
               --generate-notes
