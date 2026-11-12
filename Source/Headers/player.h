@@ -235,6 +235,21 @@ typedef struct
 	short				targetedPlayer;								// player currently targeted
 	float				targetingTimer;								// how long player has been targeted
 	OGLVector2D			pathVec;
+	short				aiMode;										// battle AI goal mode (AI_MODE_*)
+	short				aiTargetPlayer;								// player index for chase / intercept / flee
+	float				aiReplanTimer;								// countdown to next battle AI replan (s)
+	float				aiGoalX;									// world X target coordinate in battle modes
+	float				aiGoalZ;									// world Z target coordinate in battle modes
+	float				aiEscapeX;									// hysteresis escape destination X
+	float				aiEscapeZ;									// hysteresis escape destination Z
+	signed char			aiStuckDir;									// alternating reverse steer direction (+1 / -1)
+	short				aiStuckCount;								// consecutive stuck triggers without progress
+	float				aiGoalTimer;								// time spent circling close to static item/torch (s)
+	float				aiLastGoalX;								// previous tracked goal X for orbit detection
+	float				aiLastGoalZ;								// previous tracked goal Z for orbit detection
+	float				aiIgnoreX;									// temporarily blacklisted circled pickup/torch X
+	float				aiIgnoreZ;									// temporarily blacklisted circled pickup/torch Z
+	float				aiIgnoreTimer;								// countdown before blacklisted target resets (s)
 
 			/* AUDIO */
 

@@ -164,7 +164,7 @@ ObjNode	*multiplayerText = NULL;
 
 			/* SEE IF DOING 2-PLAYER LOCALLY */
 
-	if (gNumLocalPlayers > 1)
+	if (gNumLocalPlayers > 1 || gGameMode == GAME_MODE_CAPTUREFLAG)
 	{
 		NewObjectDefinitionType newObjDef =
 		{
@@ -248,7 +248,7 @@ ObjNode	*multiplayerText = NULL;
 		gSex[0]->Skeleton->overrideTexture = gCavemanSkins[0][skinID];
 		gSex[1]->Skeleton->overrideTexture = gCavemanSkins[1][skinID];
 
-		if (gGameMode == GAME_MODE_CAPTUREFLAG)
+		if (gGameMode == GAME_MODE_CAPTUREFLAG && multiplayerText != NULL)
 		{
 			int team = gPlayerInfo[whichPlayer].team;
 			if (team == RED_TEAM)

@@ -75,17 +75,40 @@ static void OnToggleMultiplayerCPUs(const MenuItem* item)
 	LayoutCurrentMenuAgain();
 }
 
+static Boolean AreMultiplayerCPUsActive(void)
+{
+	return (IsBattleGameMode(gGameMode) && gNumRealPlayers == 1) || (gMultiplayerCPUs != 0);
+}
+
+static int GetMultiplayerRaceOptionFlags(const MenuItem* item)
+{
+	(void)item;
+	return IsBattleGameMode(gGameMode) ? (kMILayoutFlagHidden | kMILayoutFlagDisabled) : 0;
+}
+
+static int GetMultiplayerBattleCPUToggleFlags(const MenuItem* item)
+{
+	(void)item;
+	return (IsBattleGameMode(gGameMode) && gNumRealPlayers > 1) ? 0 : (kMILayoutFlagHidden | kMILayoutFlagDisabled);
+}
+
+static int GetMultiplayerBattleStartFlags(const MenuItem* item)
+{
+	(void)item;
+	return IsBattleGameMode(gGameMode) ? 0 : (kMILayoutFlagHidden | kMILayoutFlagDisabled);
+}
+
 static int GetMultiplayerDifficultyFlags(const MenuItem* item)
 {
 	(void)item;
-	return gMultiplayerCPUs ? 0 : (kMILayoutFlagHidden | kMILayoutFlagDisabled);
+	return AreMultiplayerCPUsActive() ? 0 : (kMILayoutFlagHidden | kMILayoutFlagDisabled);
 }
 
 static void OnStartMultiplayerRace(const MenuItem* item)
 {
 	(void)item;
 	SavePrefs();
-	gNumTotalPlayers = gMultiplayerCPUs ? MAX_PLAYERS : gNumRealPlayers;
+	gNumTotalPlayers = AreMultiplayerCPUsActive() ? MAX_PLAYERS : gNumRealPlayers;
 	gGameView->fadePillarbox = true;
 	gGameView->fadeSound = true;
 	gGameView->fadeOutDuration = .3f;
@@ -95,7 +118,18 @@ static const MenuItem gMultiplayerRaceOptionsTree[] =
 {
 	{ .id = 'mprc' },
 	{
-		kMICycler1, STR_CPU_RACERS, .callback = OnToggleMultiplayerCPUs, .cycler =
+		kMICycler1, STR_CPU_RACERS, .getLayoutFlags = GetMultiplayerRaceOptionFlags, .callback = OnToggleMultiplayerCPUs, .cycler =
+		{
+			.valuePtr = &gMultiplayerCPUs,
+			.choices =
+			{
+				{ STR_OFF, 0 },
+				{ STR_ON,  1 },
+			}
+		}
+	},
+	{
+		kMICycler1, STR_CPU_PLAYERS, .getLayoutFlags = GetMultiplayerBattleCPUToggleFlags, .callback = OnToggleMultiplayerCPUs, .cycler =
 		{
 			.valuePtr = &gMultiplayerCPUs,
 			.choices =
@@ -119,7 +153,8 @@ static const MenuItem gMultiplayerRaceOptionsTree[] =
 		}
 	},
 	{ kMISpacer, .customHeight = .5f },
-	{ kMIPick, STR_START_RACE, .callback = OnStartMultiplayerRace, .id = 1, .next = 'EXIT' },
+	{ kMIPick, STR_START_RACE, .getLayoutFlags = GetMultiplayerRaceOptionFlags, .callback = OnStartMultiplayerRace, .id = 1, .next = 'EXIT' },
+	{ kMIPick, STR_START_MATCH, .getLayoutFlags = GetMultiplayerBattleStartFlags, .callback = OnStartMultiplayerRace, .id = 1, .next = 'EXIT' },
 	{ 0 },
 };
 
@@ -201,7 +236,7 @@ Boolean DoMultiPlayerVehicleSelections(void)
 				}
 			}
 
-			if (gGameMode == GAME_MODE_MULTIPLAYERRACE && DoMultiplayerRaceOptionsScreen())
+			if ((gGameMode == GAME_MODE_MULTIPLAYERRACE || IsBattleGameMode(gGameMode)) && DoMultiplayerRaceOptionsScreen())
 			{
 				currentScreen = totalHumanScreens - 1;
 				continue;
@@ -263,7 +298,7 @@ Boolean DoVehicleSelectScreen(short whichPlayer, Boolean allowAborting)
 		gGameView->fadePillarbox = true;
 
 		if (whichPlayer == gNumRealPlayers-1 &&
-			(gGameMode != GAME_MODE_MULTIPLAYERRACE || gNetGameInProgress))
+			((gGameMode != GAME_MODE_MULTIPLAYERRACE && !IsBattleGameMode(gGameMode)) || gNetGameInProgress))
 		{
 			gGameView->fadeSound = true;
 			gGameView->fadeOutDuration = .3f;
@@ -309,7 +344,7 @@ int					age;
 		age = 2;
 	gNumVehiclesToChooseFrom = 7 + (age * 2);				// set # cars we can pick from
 
-	if (gNumRealPlayers > 1)							// let use any car in mutliplayer mode
+	if ((gNumRealPlayers > 1) || IsBattleGameMode(gGameMode))	// let use any car in multiplayer/battle modes
 		gNumVehiclesToChooseFrom = NUM_LAND_CAR_TYPES;
 
 			/**************/

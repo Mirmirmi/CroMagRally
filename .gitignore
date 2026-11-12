@@ -8,3 +8,7 @@ dist/
 .vs/
 .DS_Store
 *.user
+
+# Python
+__pycache__/
+*.pyc

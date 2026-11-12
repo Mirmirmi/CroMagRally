@@ -143,7 +143,10 @@ short	i;
 				break;
 
 		default:
-				gNumTotalPlayers = gNumRealPlayers;				// no CPU players in battle modes
+				if (IsBattleGameMode(gGameMode))
+					gNumTotalPlayers = ((gNumRealPlayers == 1) || gMultiplayerCPUs) ? MAX_PLAYERS : gNumRealPlayers;
+				else
+					gNumTotalPlayers = gNumRealPlayers;
 				break;
 
 
@@ -226,7 +229,7 @@ uint32_t mpVehicleRng = (uint32_t)SDL_GetPerformanceCounter() | 1u;
 	{
 		if (gPlayerInfo[i].isComputer)									// set CPU vehicle type
 		{
-			if (gGameMode == GAME_MODE_MULTIPLAYERRACE)
+			if (gGameMode >= GAME_MODE_MULTIPLAYERRACE)
 			{
 				gPlayerInfo[i].vehicleType = PickMultiplayerCPUVehicle(taken, &mpVehicleRng);
 			}
@@ -241,7 +244,7 @@ uint32_t mpVehicleRng = (uint32_t)SDL_GetPerformanceCounter() | 1u;
 			}
 		}
 
-		gPlayerInfo[i].coord.y = GetTerrainY(gPlayerInfo[i].startX,gPlayerInfo[i].startX);
+		gPlayerInfo[i].coord.y = GetTerrainY(gPlayerInfo[i].startX, gPlayerInfo[i].startZ);
 
 			/* CREATE THE CAR MODEL */
 
@@ -380,6 +383,21 @@ uint32_t mpVehicleRng = (uint32_t)SDL_GetPerformanceCounter() | 1u;
 		gPlayerInfo[i].targetingTimer	= 0;
 		gPlayerInfo[i].pathVec.x	= 0;
 		gPlayerInfo[i].pathVec.y	= 0;
+		gPlayerInfo[i].aiMode			= 0;
+		gPlayerInfo[i].aiTargetPlayer	= -1;
+		gPlayerInfo[i].aiReplanTimer	= 0.05f * (float)i;
+		gPlayerInfo[i].aiGoalX			= gPlayerInfo[i].startX;
+		gPlayerInfo[i].aiGoalZ			= gPlayerInfo[i].startZ;
+		gPlayerInfo[i].aiEscapeX		= 0.0f;
+		gPlayerInfo[i].aiEscapeZ		= 0.0f;
+		gPlayerInfo[i].aiStuckDir		= (i & 1) ? 1 : -1;
+		gPlayerInfo[i].aiStuckCount		= 0;
+		gPlayerInfo[i].aiGoalTimer		= 0.0f;
+		gPlayerInfo[i].aiLastGoalX		= 0.0f;
+		gPlayerInfo[i].aiLastGoalZ		= 0.0f;
+		gPlayerInfo[i].aiIgnoreX		= 0.0f;
+		gPlayerInfo[i].aiIgnoreZ		= 0.0f;
+		gPlayerInfo[i].aiIgnoreTimer	= 0.0f;
 
 
 
@@ -482,6 +500,36 @@ void SetPlayerParmsFromTileAttributes(short playerNum, uint16_t flags)
 /******************** FIND CLOSEST PLAYER ****************************/
 //
 // Returns -1 if no other players in range
+/****************** SHOULD SKIP PLAYER TARGET ********************/
+//
+// Filters out self, eliminated players, disallowed CPU targets, and CTF teammates
+// (only when sourceNode itself is a player vehicle, never turret traps).
+//
+
+static Boolean ShouldSkipPlayerTarget(ObjNode *sourceNode, short candidatePlayer, Boolean allowCPUCars)
+{
+ObjNode	*target = gPlayerInfo[candidatePlayer].objNode;
+
+	if ((target == nil) || (target == sourceNode))
+		return(true);
+
+	if (gPlayerInfo[candidatePlayer].isEliminated)
+		return(true);
+
+	if (!allowCPUCars && gPlayerInfo[candidatePlayer].isComputer)
+		return(true);
+
+	if ((gGameMode == GAME_MODE_CAPTUREFLAG) && (sourceNode != nil) && (sourceNode->CType & CTYPE_PLAYER))
+	{
+		if (gPlayerInfo[candidatePlayer].team == gPlayerInfo[sourceNode->PlayerNum].team)
+			return(true);
+	}
+
+	return(false);
+}
+
+
+/****************** FIND CLOSEST PLAYER ***********************/
 //
 // Ignore thePlayer if != nil
 //
@@ -495,16 +543,10 @@ float	d;
 
 	for (p = 0; p < gNumTotalPlayers; p++)
 	{
-		target = gPlayerInfo[p].objNode;
-
-		if (target == thePlayer)
+		if (ShouldSkipPlayerTarget(thePlayer, p, allowCPUCars))
 			continue;
 
-		if (!allowCPUCars)
-		{
-			if (gPlayerInfo[p].isComputer)
-				continue;
-		}
+		target = gPlayerInfo[p].objNode;
 
 		d = CalcDistance(x,z, target->Coord.x, target->Coord.z);
 		if (d > range)
@@ -522,15 +564,9 @@ float	d;
 }
 
 
+/****************** FIND CLOSEST PLAYER DIRECTIONAL ***********************/
 
-/******************** FIND CLOSEST PLAYER IN FRONT ****************************/
-//
-// Returns -1 if no other players in range
-//
-// INPUT:  angle, 0 = full 180 degrees in front, 1.0 = none
-//
-
-short FindClosestPlayerInFront(ObjNode *theNode, float range, Boolean allowCPUCars, float *dist, float angle)
+static short FindClosestPlayerDirectional(ObjNode *theNode, float range, Boolean allowCPUCars, float *dist, float angle, Boolean requireInFront)
 {
 short	p,bestP = -1;
 ObjNode	*target;
@@ -545,19 +581,12 @@ OGLVector2D	aimVec, toVec;
 	aimVec.x = -sin(r);
 	aimVec.y = -cos(r);
 
-
 	for (p = 0; p < gNumTotalPlayers; p++)
 	{
-		target = gPlayerInfo[p].objNode;
-
-		if (target == theNode)
+		if (ShouldSkipPlayerTarget(theNode, p, allowCPUCars))
 			continue;
 
-		if (!allowCPUCars)
-		{
-			if (gPlayerInfo[p].isComputer)
-				continue;
-		}
+		target = gPlayerInfo[p].objNode;
 
 		d = CalcDistance(x,z, target->Coord.x, target->Coord.z);		// calc dist & check range
 		if (d > range)
@@ -568,7 +597,7 @@ OGLVector2D	aimVec, toVec;
 		FastNormalizeVector2D(toVec.x, toVec.y, &toVec, true);			// calc normal to target
 
 		dot = OGLVector2D_Dot(&aimVec, &toVec);							// dot = angle
-		if (dot < angle)													// if in back, then skip
+		if (requireInFront ? (dot < angle) : (dot > angle))
 			continue;
 
 		if (d < bestDist)
@@ -583,6 +612,19 @@ OGLVector2D	aimVec, toVec;
 }
 
 
+/******************** FIND CLOSEST PLAYER IN FRONT ****************************/
+//
+// Returns -1 if no other players in range
+//
+// INPUT:  angle, 0 = full 180 degrees in front, 1.0 = none
+//
+
+short FindClosestPlayerInFront(ObjNode *theNode, float range, Boolean allowCPUCars, float *dist, float angle)
+{
+	return(FindClosestPlayerDirectional(theNode, range, allowCPUCars, dist, angle, true));
+}
+
+
 /******************** FIND CLOSEST PLAYER IN BACK ****************************/
 //
 // Returns -1 if no other players in range
@@ -592,54 +634,7 @@ OGLVector2D	aimVec, toVec;
 
 short FindClosestPlayerInBack(ObjNode *theNode, float range, Boolean allowCPUCars, float *dist, float angle)
 {
-short	p,bestP = -1;
-ObjNode	*target;
-float	bestDist = 10000000000;
-float	x,z,d, r, dot;
-OGLVector2D	aimVec, toVec;
-
-	x = theNode->Coord.x;
-	z = theNode->Coord.z;
-
-	r = theNode->Rot.y;							// calc aim vector
-	aimVec.x = -sin(r);
-	aimVec.y = -cos(r);
-
-
-	for (p = 0; p < gNumTotalPlayers; p++)
-	{
-		target = gPlayerInfo[p].objNode;
-
-		if (target == theNode)
-			continue;
-
-		if (!allowCPUCars)
-		{
-			if (gPlayerInfo[p].isComputer)
-				continue;
-		}
-
-		d = CalcDistance(x,z, target->Coord.x, target->Coord.z);		// calc dist & check range
-		if (d > range)
-			continue;
-
-		toVec.x = target->Coord.x - x;
-		toVec.y = target->Coord.z - z;
-		FastNormalizeVector2D(toVec.x, toVec.y, &toVec, true);			// calc normal to target
-
-		dot = OGLVector2D_Dot(&aimVec, &toVec);							// dot = angle
-		if (dot > angle)												// if in front, then skip
-			continue;
-
-		if (d < bestDist)
-		{
-			bestDist = d;
-			bestP = p;
-		}
-	}
-
-	*dist = bestDist;
-	return(bestP);
+	return(FindClosestPlayerDirectional(theNode, range, allowCPUCars, dist, angle, false));
 }
 
 

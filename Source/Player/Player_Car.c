@@ -570,7 +570,7 @@ Boolean		onWater;
 
 	cpuTweakFactor = 1.0f;													// assume no tweak
 
-	if (gGamePrefs.difficulty == DIFFICULTY_HARD)
+	if (!IsBattleGameMode(gGameMode) && (gGamePrefs.difficulty == DIFFICULTY_HARD))
 	{
 		if (pinfo->isComputer)												// give cars in back a slight edge
 		{
@@ -786,13 +786,16 @@ Boolean		onWater;
 	{
 		maxSpeed = info->maxSpeed;											// get preferred max speed of car
 
-		if (pinfo->isComputer)
+		if (!IsBattleGameMode(gGameMode))
 		{
-			if (pinfo->place > gWorstHumanPlace)							// only give CPU an edge if its behind the worst human
-				maxSpeed += (float)(pinfo->place - gWorstHumanPlace) * PLACE_SPEED_TWEAK_CPU;
+			if (pinfo->isComputer)
+			{
+				if (pinfo->place > gWorstHumanPlace)						// only give CPU an edge if its behind the worst human
+					maxSpeed += (float)(pinfo->place - gWorstHumanPlace) * PLACE_SPEED_TWEAK_CPU;
+			}
+			else
+				maxSpeed += (float)(pinfo->place) * PLACE_SPEED_TWEAK;		// give human cars in back a slight edge
 		}
-		else
-			maxSpeed += (float)(pinfo->place) * PLACE_SPEED_TWEAK;				// give human cars in back a slight edge
 	}
 
 	if (pinfo->flamingTimer > 0.0f)											// half speed if flaming
@@ -1276,7 +1279,12 @@ float	fps = gFramesPerSecondFrac;
 			/* UPDATE ENGINE EFFECT */
 			/************************/
 
-	if (gPlayerInfo[p].engineChannel != -1)
+	if (gPlayerInfo[p].isEliminated)
+	{
+		if (gPlayerInfo[p].engineChannel != -1)
+			StopAChannel(&gPlayerInfo[p].engineChannel);
+	}
+	else if (gPlayerInfo[p].engineChannel != -1)
 		Update3DSoundChannel(EFFECT_ENGINE, &gPlayerInfo[p].engineChannel, &gCoord);
 	else
 		gPlayerInfo[p].engineChannel = PlayEffect_Parms3D(EFFECT_ENGINE, &gCoord, NORMAL_CHANNEL_RATE, ENGINE_VOLUME);
@@ -1841,7 +1849,8 @@ short		p2 = car2->PlayerNum;
 
 		case	GAME_MODE_TAG1:
 		case	GAME_MODE_TAG2:
-				if (!gTrackCompleted)
+				if (!gTrackCompleted &&
+					!gPlayerInfo[p1].isEliminated && !gPlayerInfo[p2].isEliminated)
 				{
 
 						/* CAR 1 WAS IT */
@@ -1883,7 +1892,7 @@ short		p2 = car2->PlayerNum;
 		/***************************/
 
 		case	GAME_MODE_SURVIVAL:
-
+				if (!gPlayerInfo[p1].isEliminated && !gPlayerInfo[p2].isEliminated)
 				{
 					OGLVector3D	impactVector;
 					float		impactSpeed,ratio,dam1,dam2;
@@ -2135,13 +2144,22 @@ Boolean			onWater;
     gPlayerInfo[player].controlBits = 0;                                     // assume nothing
 	gPlayerInfo[player].controlBits_New = 0;
 
+	if (gPlayerInfo[player].isEliminated)
+	{
+		DoPlayerControl_Car(theNode);
+		return;
+	}
+
 	gPlayerInfo[player].attackTimer -= fps;									// dec this timer
 
 
 			/* SEE IF FROZEN */
 
 	if (gPlayerInfo[player].frozenTimer > 0.0f)
+	{
+		DoPlayerControl_Car(theNode);
 		return;
+	}
 
 	onWater = gPlayerInfo[player].onWater;
 
@@ -2167,13 +2185,24 @@ Boolean			onWater;
 								gCoord.x, gCoord.y, gCoord.z) < stuckDist)		// see if player isnt moving
 			{
 				if (gPlayerInfo[player].reverseTimer > 0.0f)					// if was reversing then go forward again
+				{
 					gPlayerInfo[player].reverseTimer = 0;
+					if (IsBattleGameMode(gGameMode))
+						gPlayerInfo[player].aiReplanTimer = 0.0f;
+				}
+				else if (IsBattleGameMode(gGameMode))
+				{
+					gPlayerInfo[player].reverseTimer = 0.78f + 0.12f * (float)(gPlayerInfo[player].aiStuckCount % 2);
+					gPlayerInfo[player].aiStuckCount++;
+					gPlayerInfo[player].aiStuckDir = BattleAI_PickUnstuckDir(theNode, player);
+				}
 				else
 					gPlayerInfo[player].reverseTimer = 4.0f;					// try moving backwards to get unstuck
 			}
 			else
 			{
 				gPlayerInfo[player].reverseTimer = 0;						// player is NOT stuck, so go forward
+				gPlayerInfo[player].aiStuckCount = 0;
 			}
 
 			gPlayerInfo[player].oldPosition = gCoord;						// remember position
@@ -2199,87 +2228,131 @@ Boolean			onWater;
 
 			/* SEE IF THERE ARE ANY OBJECTS AHEAD THAT WE SHOULD AVOID */
 
-		avoidTurn = DoCPU_AvoidObjects(theNode);
-		if (avoidTurn != 0)
+		if ((gPlayerInfo[player].reverseTimer > 0.0f) && IsBattleGameMode(gGameMode))
 		{
-			if (avoidTurn == -1)
-				gPlayerInfo[player].analogSteering.x = -1.0f;
-			else
-				gPlayerInfo[player].analogSteering.x = 1.0f;
+			gPlayerInfo[player].analogSteering.x = (float)gPlayerInfo[player].aiStuckDir;
+			gPlayerInfo[player].aiReplanTimer = 0.0f;
 		}
+		else
+		{
+			avoidTurn = DoCPU_AvoidObjects(theNode);
+			if (avoidTurn != 0)
+			{
+				if (avoidTurn == -1)
+					gPlayerInfo[player].analogSteering.x = -1.0f;
+				else
+					gPlayerInfo[player].analogSteering.x = 1.0f;
+			}
 
 				/********************/
 				/* DO PATH STEERING */
 				/********************/
 
-		else
-		{
-			if (CalcPathVectorFromCoord(gCoord.x, gCoord.y, gCoord.z, &pathVec))				// get path vector
+			else if (IsBattleGameMode(gGameMode) && gBattleNav.loaded)
 			{
-			    float       cross,r;
-			    OGLVector2D aimVec;
+				float steerCmd = 0.0f;
+				float turnSharpness = 0.0f;
+				Boolean navWantBrake = false;
+				Boolean navWantGas = true;
 
-			    r = theNode->Rot.y;												// get aim vector of car
-			    aimVec.x = -sin(r);
-			    aimVec.y = -cos(r);
-	            cross = OGLVector2D_Cross(&pathVec, &aimVec);       			// the sign of the cross product will tell us which way to turn
-	            dot = OGLVector2D_Dot(&pathVec, &aimVec);          				// also get dot product
-	    		pathVarianceAngle = acos(dot);                     				// convert dot to angle
-
-	    		if (gPlayerInfo[player].reverseTimer > 0.0f)					// if reversing then change steering
-	    			cross = -cross;
-
-	    		if (pathVarianceAngle > (PI/14))								// see if outside of tolerance
+				if (BattleAI_CalcSteering(theNode, player, &pathVec, &steerCmd,
+										  &pathVarianceAngle, &turnSharpness, &navWantBrake, &navWantGas))
 				{
-					if (cross > 0.0f)
-						gPlayerInfo[player].analogSteering.x = -1.0f;
-					else
-						gPlayerInfo[player].analogSteering.x = 1.0f;
-				}
-			}
-			else
-			{
-				pathVec.x = 1;													// no path found, so set default values
-				pathVec.y = 0;
-				pathVarianceAngle = 0;
-			}
-			gPlayerInfo[player].pathVec = pathVec;								// keep a copy
-
-				/******************************************/
-				/* SEE IF NEED TO ACCEL, COAST, OR BRAKE  */
-				/******************************************/
-
-			if (gPlayerInfo[player].isPlaning || gPlayerInfo[player].greasedTiresTimer || (fabs(theNode->DeltaRot.y) > PI))	// if sliding or spinning then brake!
-				brake = true;
-			else
-			if ((theNode->Speed2D > 2500.0f) && (gGamePrefs.difficulty > DIFFICULTY_EASY))			// if we're going fast then see if we need to slow
-			{
-				OGLVector2D	futurePathVec;
-
-				if (pathVarianceAngle > (PI/3))									// if we're aiming extremely the wrong way, then brake
-				{
-					brake = true;
+					gPlayerInfo[player].analogSteering.x = steerCmd;
 				}
 				else
 				{
-					/* GET PATH VECTOR FAR AHEAD OF US TO SEE IF WE'RE ABOUT TO TURN SHARP */
+					pathVec.x = 1;
+					pathVec.y = 0;
+					pathVarianceAngle = 0;
+				}
+				gPlayerInfo[player].pathVec = pathVec;
 
-					x = gCoord.x + (gDelta.x * .9f);									// project n seconds into the future
-					z = gCoord.z + (gDelta.z * .9f);
-					if (CalcPathVectorFromCoord(x, gCoord.y, z, &futurePathVec))		// get path vector
+				if (!navWantGas)
+					giveGas = false;
+
+				if (gPlayerInfo[player].isPlaning || gPlayerInfo[player].greasedTiresTimer ||
+					(fabs(theNode->DeltaRot.y) > PI) || navWantBrake)
+				{
+					brake = true;
+				}
+				else if ((theNode->Speed2D > 2500.0f) && (gGamePrefs.difficulty > DIFFICULTY_EASY))
+				{
+					if (pathVarianceAngle > (PI/3))
+						brake = true;
+					else if (turnSharpness > 0.7f)
+						giveGas = false;
+				}
+			}
+			else
+			{
+				if (CalcPathVectorFromCoord(gCoord.x, gCoord.y, gCoord.z, &pathVec))				// get path vector
+				{
+				    float       cross,r;
+				    OGLVector2D aimVec;
+
+				    r = theNode->Rot.y;												// get aim vector of car
+				    aimVec.x = -sin(r);
+				    aimVec.y = -cos(r);
+		            cross = OGLVector2D_Cross(&pathVec, &aimVec);       			// the sign of the cross product will tell us which way to turn
+		            dot = OGLVector2D_Dot(&pathVec, &aimVec);          				// also get dot product
+		    		pathVarianceAngle = acos(dot);                     				// convert dot to angle
+
+		    		if (gPlayerInfo[player].reverseTimer > 0.0f)					// if reversing then change steering
+		    			cross = -cross;
+
+		    		if (pathVarianceAngle > (PI/14))								// see if outside of tolerance
 					{
-						/* SEE HOW MUCH WE'RE GOING TO NEED TO TURN */
+						if (cross > 0.0f)
+							gPlayerInfo[player].analogSteering.x = -1.0f;
+						else
+							gPlayerInfo[player].analogSteering.x = 1.0f;
+					}
+				}
+				else
+				{
+					pathVec.x = 1;													// no path found, so set default values
+					pathVec.y = 0;
+					pathVarianceAngle = 0;
+				}
+				gPlayerInfo[player].pathVec = pathVec;								// keep a copy
 
-						dot = OGLVector2D_Dot(&pathVec, &futurePathVec);
-						if (dot < 0.0f) 												// if (-) then we'll be doing a 180, so brake!
+					/******************************************/
+					/* SEE IF NEED TO ACCEL, COAST, OR BRAKE  */
+					/******************************************/
+
+				if (gPlayerInfo[player].isPlaning || gPlayerInfo[player].greasedTiresTimer || (fabs(theNode->DeltaRot.y) > PI))	// if sliding or spinning then brake!
+					brake = true;
+				else
+				if ((theNode->Speed2D > 2500.0f) && (gGamePrefs.difficulty > DIFFICULTY_EASY))			// if we're going fast then see if we need to slow
+				{
+					OGLVector2D	futurePathVec;
+
+					if (pathVarianceAngle > (PI/3))									// if we're aiming extremely the wrong way, then brake
+					{
+						brake = true;
+					}
+					else
+					{
+						/* GET PATH VECTOR FAR AHEAD OF US TO SEE IF WE'RE ABOUT TO TURN SHARP */
+
+						x = gCoord.x + (gDelta.x * .9f);									// project n seconds into the future
+						z = gCoord.z + (gDelta.z * .9f);
+						if (CalcPathVectorFromCoord(x, gCoord.y, z, &futurePathVec))		// get path vector
 						{
-							brake = true;
-				  		}
-				  		else
-				  		if (dot < .3f)													// if its a tight turn, then just let off gas
-				  		{
-				  			giveGas = false;
-				  		}
+							/* SEE HOW MUCH WE'RE GOING TO NEED TO TURN */
+
+							dot = OGLVector2D_Dot(&pathVec, &futurePathVec);
+							if (dot < 0.0f) 												// if (-) then we'll be doing a 180, so brake!
+							{
+								brake = true;
+					  		}
+					  		else
+					  		if (dot < .3f)													// if its a tight turn, then just let off gas
+					  		{
+					  			giveGas = false;
+					  		}
+						}
 					}
 				}
 			}
@@ -2390,6 +2463,31 @@ void DoCPUPowerupLogic(ObjNode *carObj, short playerNum)
 {
 short	powType;
 
+	if (gGameMode == GAME_MODE_CAPTUREFLAG && carObj->CapturedFlag != nil)
+	{
+		ObjNode	*heldTorch = (ObjNode *)carObj->CapturedFlag;
+
+		if (heldTorch->TorchTeam != gPlayerInfo[playerNum].team)
+		{
+			gPlayerInfo[playerNum].controlBits |= (1L << kControlBit_ThrowForward);
+			return;
+		}
+
+		/*
+		 * VehicleActivatePOW drops any carried torch before firing a weapon,
+		 * so only allow Nitro (activated directly without ThrowForward) while
+		 * carrying our own team's torch.
+		 */
+		if ((gGamePrefs.difficulty > DIFFICULTY_EASY) &&
+			(gPlayerInfo[playerNum].powQuantity > 0) &&
+			(gPlayerInfo[playerNum].powType == POW_TYPE_NITRO) &&
+			(gPlayerInfo[playerNum].attackTimer <= 0.0f))
+		{
+			DoCPUPOWLogic_Nitro(carObj, playerNum);
+		}
+		return;
+	}
+
 	if (gGamePrefs.difficulty <= DIFFICULTY_EASY)			// CPU doesnt shoot in easy mode
 		return;
 
@@ -2400,6 +2498,22 @@ short	powType;
 		return;
 
 	powType = gPlayerInfo[playerNum].powType;				// get pow type
+
+	if ((gGameMode == GAME_MODE_TAG1) && gPlayerInfo[playerNum].isIt &&
+		((powType == POW_TYPE_BONE) || (powType == POW_TYPE_ROMANCANDLE) ||
+		 (powType == POW_TYPE_BOTTLEROCKET) || (powType == POW_TYPE_BIRDBOMB) ||
+		 (powType == POW_TYPE_TORPEDO)))
+	{
+		short target = gPlayerInfo[playerNum].aiTargetPlayer;
+		if ((target >= 0) && (gPlayerInfo[target].objNode != nil) &&
+			(CalcQuickDistance(carObj->Coord.x, carObj->Coord.z,
+							   gPlayerInfo[target].objNode->Coord.x,
+							   gPlayerInfo[target].objNode->Coord.z) < 1600.0f))
+		{
+			return;
+		}
+	}
+
 	switch(powType)
 	{
 		case	POW_TYPE_NONE:
@@ -2455,6 +2569,20 @@ static void DoCPUPOWLogic_Nitro(ObjNode *carObj, short playerNum)
 }
 
 
+/****************** SHOULD CPU ATTACK CPU CARS ********************/
+
+static Boolean ShouldCPUAttackCPUCars(short playerNum, Boolean hardOnlyInRace)
+{
+	if (IsBattleGameMode(gGameMode) || gIsSelfRunningDemo)
+		return(true);
+
+	if (hardOnlyInRace && (gGamePrefs.difficulty != DIFFICULTY_HARD))
+		return(true);
+
+	return(gPlayerInfo[playerNum].place < gWorstHumanPlace);
+}
+
+
 /****************** DO CPU WEAPONS LOGIC:  STANDARD ********************/
 //
 // Standard objects are those that can be thrown easily.
@@ -2475,22 +2603,7 @@ short	bestFront,bestBack,bestShot;
 
 		/* CPU CARS ONLY ATTACK OTHER CPU CARS IF THEY'RE IN FRONT OF PLAYER */
 
-	if (gIsSelfRunningDemo)							// lots of action in SRD mode
-	{
-		attackCPUCars = true;
-	}
-	else
-	{
-		if (gGamePrefs.difficulty == DIFFICULTY_HARD)
-		{
-			if (gPlayerInfo[playerNum].place < gWorstHumanPlace)
-				attackCPUCars = true;
-			else
-				attackCPUCars = false;
-		}
-		else
-			attackCPUCars = true;
-	}
+	attackCPUCars = ShouldCPUAttackCPUCars(playerNum, true);
 
 
 			/***************************************************/
@@ -2593,10 +2706,7 @@ short	targetP;
 
 		/* CPU CARS ONLY ATTACK OTHER CPU CARS IF THEY'RE IN FRONT OF PLAYER */
 
-	if (gPlayerInfo[playerNum].place < gWorstHumanPlace)
-		attackCPUCars = true;
-	else
-		attackCPUCars = false;
+	attackCPUCars = ShouldCPUAttackCPUCars(playerNum, false);
 
 
 
@@ -2659,10 +2769,7 @@ Boolean	attackCPUCars, inFront;
 
 		/* CPU CARS ONLY ATTACK OTHER CPU CARS IF THEY'RE IN FRONT OF PLAYER */
 
-	if (gPlayerInfo[playerNum].place < gWorstHumanPlace)
-		attackCPUCars = true;
-	else
-		attackCPUCars = false;
+	attackCPUCars = ShouldCPUAttackCPUCars(playerNum, false);
 
 
 
@@ -3220,7 +3327,7 @@ ObjNode	*obj;
 				/* CAUSE DROP TORCH */
 
 			else
-			if (gGameMode == GAME_MODE_SURVIVAL)
+			if (gGameMode == GAME_MODE_CAPTUREFLAG)
 				PlayerDropFlag(obj);
 
 

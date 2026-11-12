@@ -1567,9 +1567,9 @@ float	timer,x,y, scale, spacing, dist;
 		/* ALSO DRAW TIME MARKER FOR CLOSEST OPPONENT */
 		/**********************************************/
 
-	p2 = FindClosestPlayerInFront(gPlayerInfo[p].objNode, 10000, false, &dist, .5);			// check directly ahead
+	p2 = FindClosestPlayerInFront(gPlayerInfo[p].objNode, 10000, true, &dist, .5);			// check directly ahead
 	if (p2 == -1)
-		p2 = FindClosestPlayer(gPlayerInfo[p].objNode, gPlayerInfo[p].coord.x, gPlayerInfo[p].coord.z, 20000, false, &dist);
+		p2 = FindClosestPlayer(gPlayerInfo[p].objNode, gPlayerInfo[p].coord.x, gPlayerInfo[p].coord.z, 20000, true, &dist);
 
 	if (p2 != -1)
 	{

@@ -26,6 +26,8 @@ enum
 	NUM_GAME_MODES
 };
 
+#define IsBattleGameMode(mode)	((mode) >= GAME_MODE_TAG1 && (mode) < NUM_GAME_MODES)
+
 
 enum
 {
