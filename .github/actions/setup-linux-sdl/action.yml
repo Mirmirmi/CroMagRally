@@ -1,0 +1,36 @@
+name: Setup Linux SDL3 dependencies
+description: Install Ubuntu build packages and restore or compile cached SDL3 for Linux builds.
+runs:
+  using: composite
+  steps:
+    - name: Get build dependencies from APT
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libasound2-dev libpulse-dev \
+          libaudio-dev libjack-dev libsndio-dev libx11-dev libxext-dev \
+          libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev \
+          libxkbcommon-dev libdrm-dev libgbm-dev libgl1-mesa-dev libgles2-mesa-dev \
+          libegl1-mesa-dev libdbus-1-dev libibus-1.0-dev libudev-dev fcitx-libs-dev \
+          libpipewire-0.3-dev libwayland-dev libdecor-0-dev liburing-dev \
+          desktop-file-utils libfuse2
+
+    - name: Read SDL version and architecture
+      id: sdl-meta
+      shell: bash
+      run: |
+        SDL_VER=$(python3 -c 'import re; print(re.search(r"^sdl_ver\s*=\s*\"([^\"]+)\"", open("build.py").read(), re.M).group(1))')
+        echo "version=$SDL_VER" >> "$GITHUB_OUTPUT"
+        echo "arch=$(uname -m)" >> "$GITHUB_OUTPUT"
+
+    - name: Cache built SDL3
+      id: cache-sdl
+      uses: actions/cache@v4
+      with:
+        path: extern/SDL3-${{ steps.sdl-meta.outputs.version }}/install
+        key: sdl3-linux-${{ steps.sdl-meta.outputs.arch }}-${{ steps.sdl-meta.outputs.version }}-v1
+
+    - name: Build SDL3 from source
+      if: steps.cache-sdl.outputs.cache-hit != 'true'
+      shell: bash
+      run: python3 build.py --dependencies

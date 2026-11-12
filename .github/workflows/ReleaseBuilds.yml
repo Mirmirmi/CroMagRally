@@ -4,10 +4,26 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - '**'
+      - master
+    tags:
+      - 'v*'
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
+  asset-check:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run asset and metadata checks
+        run: python3 .github/scripts/check_assets.py
+
   build-linux-appimage:
+    needs: asset-check
+    name: Linux (${{ matrix.platform.name }})
     runs-on: ${{ matrix.platform.os }}
     timeout-minutes: 20
     env:
@@ -20,26 +36,79 @@ jobs:
           - { name: x86_64, os: ubuntu-22.04 }
     steps:
       - uses: actions/checkout@v4
-        with: {submodules: 'recursive'}
-      - name: Get build dependencies from APT
-        # cf. https://github.com/libsdl-org/SDL/blob/main/docs/README-linux.md
-        # + desktop-file-utils for appimagetool
-        run: |
-          sudo apt update
-          sudo apt install -y libasound2-dev libpulse-dev \
-            libaudio-dev libjack-dev libsndio-dev libx11-dev libxext-dev \
-            libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev \
-            libxkbcommon-dev libdrm-dev libgbm-dev libgl1-mesa-dev libgles2-mesa-dev \
-            libegl1-mesa-dev libdbus-1-dev libibus-1.0-dev libudev-dev fcitx-libs-dev \
-            libpipewire-0.3-dev libwayland-dev libdecor-0-dev liburing-dev \
-            desktop-file-utils libfuse2
-      - run: echo "ARTIFACT_NAME=$(python3 build.py --print-artifact-name)" >> $GITHUB_ENV
-      - run: python3 build.py --dependencies
-      - run: python3 build.py --configure
-      - run: python3 build.py --build
-      - run: python3 build.py --package
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/setup-linux-sdl
+      - run: echo "ARTIFACT_NAME=$(python3 build.py --print-artifact-name)" >> "$GITHUB_ENV"
+      - run: python3 build.py --configure --build --package
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{env.ARTIFACT_NAME}}
+          name: ${{ env.ARTIFACT_NAME }}
           path: dist/
           compression-level: 0
+          retention-days: 14
+
+  build-windows:
+    needs: asset-check
+    name: Windows (x64)
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - run: |
+          $ARTIFACT_NAME = python3 build.py --print-artifact-name
+          echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $env:GITHUB_ENV
+      - run: python3 build.py --dependencies --configure --build --package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: dist/
+          compression-level: 0
+          retention-days: 14
+
+  build-macos:
+    needs: asset-check
+    name: macOS (Universal)
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - run: echo "ARTIFACT_NAME=$(python3 build.py --print-artifact-name)" >> "$GITHUB_ENV"
+      - run: python3 build.py --dependencies --configure --build --package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: dist/
+          compression-level: 0
+          retention-days: 14
+
+  publish-release:
+    needs: [build-linux-appimage, build-windows, build-macos]
+    if: startsWith(github.ref, 'refs/tags/v')
+    name: Publish GitHub Release
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          ls -lh release-artifacts/
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" release-artifacts/* --clobber
+          else
+            gh release create "$TAG" release-artifacts/* \
+              --title "Cro-Mag Rally $TAG" \
+              --generate-notes
+          fi
