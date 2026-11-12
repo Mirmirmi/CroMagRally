@@ -615,12 +615,170 @@ ObjNode	*newObj;
 }
 
 
+/***************** SET ROTATED SUB-COLLISION BOX ******************/
+/* Builds one world-space AABB in boxes from local bounds rotated by theNode->Rot.y. */
+
+static void SetRotatedSubCollisionBox(const ObjNode *theNode, const OGLMatrix3x3 *rotMat, CollisionBoxType *box,
+									  float minX, float maxX, float minY, float maxY, float minZ, float maxZ)
+{
+	const float xs[2] = {minX * theNode->Scale.x, maxX * theNode->Scale.x};
+	const float zs[2] = {minZ * theNode->Scale.z, maxZ * theNode->Scale.z};
+	float worldMinX = 0.0f, worldMaxX = 0.0f;
+	float worldMinZ = 0.0f, worldMaxZ = 0.0f;
+
+	for (int ix = 0; ix < 2; ix++)
+	{
+		for (int iz = 0; iz < 2; iz++)
+		{
+			OGLPoint2D localPt = {xs[ix], zs[iz]};
+			OGLPoint2D rotPt;
+			OGLPoint2D_Transform(&localPt, rotMat, &rotPt);
+
+			if (ix == 0 && iz == 0)
+			{
+				worldMinX = worldMaxX = rotPt.x;
+				worldMinZ = worldMaxZ = rotPt.y;
+			}
+			else
+			{
+				if (rotPt.x < worldMinX) worldMinX = rotPt.x;
+				if (rotPt.x > worldMaxX) worldMaxX = rotPt.x;
+				if (rotPt.y < worldMinZ) worldMinZ = rotPt.y;
+				if (rotPt.y > worldMaxZ) worldMaxZ = rotPt.y;
+			}
+		}
+	}
+
+	box->left   = (long)floorf(theNode->Coord.x + worldMinX);
+	box->right  = (long)ceilf(theNode->Coord.x + worldMaxX);
+	box->bottom = (long)floorf(theNode->Coord.y + minY * theNode->Scale.y);
+	box->top    = (long)ceilf(theNode->Coord.y + maxY * theNode->Scale.y);
+	box->back   = (long)floorf(theNode->Coord.z + worldMinZ);
+	box->front  = (long)ceilf(theNode->Coord.z + worldMaxZ);
+}
+
+
+/*************** CREATE VIKING SHIP COLLISION BOXES *****************/
+/* Builds multi-box geometry for SCANDINAVIA_ObjType_VikingShip:
+   8 slanted support legs (3 tiers each), 7-slice hull + raised ends, and mast,
+   avoiding a single oversized diagonal AABB while keeping ground clearance under the hull. */
+
+static void CreateVikingShipCollisionBoxes(ObjNode *theNode)
+{
+	enum
+	{
+		NUM_SUPPORT_STATIONS = 4,
+		NUM_SUPPORT_TIERS    = 3,
+		NUM_HULL_SLICES      = 7,
+		NUM_END_SEGMENTS     = 2,
+		TOTAL_BOXES          = (NUM_SUPPORT_STATIONS * 2 * NUM_SUPPORT_TIERS)
+		                       + (NUM_HULL_SLICES * 3)
+		                       + (2 * NUM_END_SEGMENTS)
+		                       + 1,
+	};
+
+	static const float supportZ[NUM_SUPPORT_STATIONS] = {-1799.6f, -749.6f, 749.6f, 1799.6f};
+	static const float supportHalfZ = 64.0f;
+
+	typedef struct
+	{
+		float innerX;
+		float outerX;
+		float minY;
+		float maxY;
+	} SupportTierDef;
+
+	/* Tier 2 extends minY to -30 so CollisionDetect's minimum-penetration fallback
+	   cannot resolve low side hits downward onto Tier 1's floor side. */
+	static const SupportTierDef supportTiers[NUM_SUPPORT_TIERS] =
+	{
+		{507.0f, 724.0f, -30.0f, 160.0f},
+		{400.0f, 639.0f, -30.0f, 340.0f},
+		{248.0f, 532.0f, 340.0f, 615.0f},
+	};
+
+	typedef struct
+	{
+		float innerZ;
+		float outerZ;
+		float halfX;
+		float minY;
+		float maxY;
+	} BowSternDef;
+
+	static const BowSternDef bowSternDefs[NUM_END_SEGMENTS] =
+	{
+		{2100.0f, 2550.0f, 360.0f, 440.0f, 1050.0f},
+		{2550.0f, 3050.0f, 180.0f, 765.0f, 1800.0f},
+	};
+
+	OGLMatrix3x3 rotMat;
+	OGLMatrix3x3_SetRotate(&rotMat, -theNode->Rot.y);
+
+	AllocateCollisionBoxMemory(theNode, TOTAL_BOXES);
+	CollisionBoxType *boxes = theNode->CollisionBoxes;
+	int boxIndex = 0;
+
+	/* 8 slanted wooden support cradles (24 boxes) */
+	for (int station = 0; station < NUM_SUPPORT_STATIONS; station++)
+	{
+		const float minZ = supportZ[station] - supportHalfZ;
+		const float maxZ = supportZ[station] + supportHalfZ;
+
+		for (int side = -1; side <= 1; side += 2)
+		{
+			for (int tier = 0; tier < NUM_SUPPORT_TIERS; tier++)
+			{
+				const SupportTierDef *t = &supportTiers[tier];
+				const float minX = (side < 0) ? -t->outerX : t->innerX;
+				const float maxX = (side < 0) ? -t->innerX : t->outerX;
+				SetRotatedSubCollisionBox(theNode, &rotMat, &boxes[boxIndex++],
+										  minX, maxX, t->minY, t->maxY, minZ, maxZ);
+			}
+		}
+	}
+
+	/* Hull midbody sliced along Z to stay tight at 45-degree rotations (21 boxes) */
+	for (int slice = 0; slice < NUM_HULL_SLICES; slice++)
+	{
+		const float z0 = -2100.0f + slice * 600.0f;
+		const float z1 = z0 + 600.0f;
+
+		SetRotatedSubCollisionBox(theNode, &rotMat, &boxes[boxIndex++],
+								  -260.0f, 260.0f, 350.0f, 520.0f, z0, z1);
+		SetRotatedSubCollisionBox(theNode, &rotMat, &boxes[boxIndex++],
+								  -580.0f, 0.0f, 520.0f, 990.0f, z0, z1);
+		SetRotatedSubCollisionBox(theNode, &rotMat, &boxes[boxIndex++],
+								  0.0f, 580.0f, 520.0f, 990.0f, z0, z1);
+	}
+
+	/* Raised bow and stern flares (4 boxes) */
+	for (int endSign = -1; endSign <= 1; endSign += 2)
+	{
+		for (int seg = 0; seg < NUM_END_SEGMENTS; seg++)
+		{
+			const BowSternDef *d = &bowSternDefs[seg];
+			const float minZ = (endSign < 0) ? -d->outerZ : d->innerZ;
+			const float maxZ = (endSign < 0) ? -d->innerZ : d->outerZ;
+			SetRotatedSubCollisionBox(theNode, &rotMat, &boxes[boxIndex++],
+									  -d->halfX, d->halfX, d->minY, d->maxY, minZ, maxZ);
+		}
+	}
+
+	/* Mast (1 box) */
+	SetRotatedSubCollisionBox(theNode, &rotMat, &boxes[boxIndex++],
+							  -70.0f, 70.0f, 900.0f, 3600.0f, -70.0f, 70.0f);
+
+	GAME_ASSERT(boxIndex == TOTAL_BOXES);
+	KeepOldCollisionBoxes(theNode);
+}
+
+
 /************************* ADD BOAT *********************************/
 
 Boolean AddBoat(TerrainItemEntryType *itemPtr, long  x, long z)
 {
 ObjNode	*newObj;
-Boolean	collision = true;
 
 
 	NewObjectDefinitionType def =
@@ -629,6 +787,7 @@ Boolean	collision = true;
 		.coord		= {x, GetTerrainY(x,z), z},
 		.flags 		= gAutoFadeStatusBits,
 		.moveCall 	= MoveStaticObject,
+		.slot 		= 40,
 		.rot 		= PI2 * ((float)itemPtr->parm[1] * (1.0f/8.0f)),
 		.scale 		= 1.0,
 	};
@@ -647,7 +806,6 @@ Boolean	collision = true;
 
 		case	TRACK_NUM_SCANDINAVIA:
 				def.type = SCANDINAVIA_ObjType_VikingShip;
-				collision = false;
 				break;
 
 		case	TRACK_NUM_ATLANTIS:
@@ -658,11 +816,6 @@ Boolean	collision = true;
 				DoFatalAlert("Can't AddBoat in track %d!", gTrackNum);
 	}
 
-	if (collision)
-		def.slot 		= 40;
-	else
-		def.slot 		= SLOT_OF_DUMB + 11;
-
 	newObj = MakeNewDisplayGroupObject(&def);
 	if (newObj == nil)
 		return(false);
@@ -671,12 +824,12 @@ Boolean	collision = true;
 
 			/* SET COLLISION STUFF */
 
-	if (collision)
-	{
-		newObj->CType 			= CTYPE_MISC;
-		newObj->CBits			= CBITS_ALLSOLID;
+	newObj->CType 			= CTYPE_MISC;
+	newObj->CBits			= CBITS_ALLSOLID;
+	if (gTrackNum == TRACK_NUM_SCANDINAVIA)
+		CreateVikingShipCollisionBoxes(newObj);
+	else
 		CreateCollisionBoxFromBoundingBox_Rotated(newObj,1,1);
-	}
 
 
 	if (gTrackNum == TRACK_NUM_ATLANTIS)			// blue tint for atlantis
