@@ -325,6 +325,7 @@ enum
 	CARPARTS_ObjType_Body_Catapult,
 	CARPARTS_ObjType_Body_xxxxxx,
 	CARPARTS_ObjType_Body_Police,
+	CARPARTS_ObjType_Body_Firetruck,
 
 	CARPARTS_ObjType_Wheel_MammothFL,
 	CARPARTS_ObjType_Wheel_MammothFR,
@@ -384,6 +385,10 @@ enum
 	CARPARTS_ObjType_Wheel_PoliceFR,
 	CARPARTS_ObjType_Wheel_PoliceBR,
 	CARPARTS_ObjType_Wheel_PoliceBL,
+	CARPARTS_ObjType_Wheel_FiretruckFL,
+	CARPARTS_ObjType_Wheel_FiretruckFR,
+	CARPARTS_ObjType_Wheel_FiretruckBR,
+	CARPARTS_ObjType_Wheel_FiretruckBL,
 
 	CARPARTS_ObjType_Submarine,
 	CARPARTS_ObjType_Propeller

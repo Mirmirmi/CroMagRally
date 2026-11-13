@@ -125,6 +125,7 @@ const UserPhysics kDefaultPhysics =
 		[CAR_TYPE_CATAPULT]		= {{6, 7, 5, 4}},
 		[CAR_TYPE_CHARIOT]		= {{7, 7, 4, 3}},
 		[CAR_TYPE_POLICE]		= {{7, 7, 5, 4}},
+		[CAR_TYPE_FIRETRUCK]	= {{7, 7, 5, 4}},
 		[CAR_TYPE_LIZARD]		= {{5, 4, 5, 4}},
 		[CAR_TYPE_SUB]			= {{0, 7, 0, 0}},
 	},
@@ -154,6 +155,7 @@ const UserPhysics kiOSPhysicsConsts =
 		[CAR_TYPE_CATAPULT]		= {{6, 3, 4, 2}},
 		[CAR_TYPE_CHARIOT]		= {{6, 4, 3, 1}},
 		[CAR_TYPE_POLICE]		= {{7, 5, 5, 3}},
+		[CAR_TYPE_FIRETRUCK]	= {{7, 5, 5, 3}},
 		[CAR_TYPE_SUB]			= {{0, 1, 0, 0}},
 	},
 };
@@ -215,6 +217,7 @@ static const float bottomOffsets[NUM_LAND_CAR_TYPES] =
 	[CAR_TYPE_CATAPULT]    = -77,
 	[CAR_TYPE_CHARIOT]     = -100,
 	[CAR_TYPE_POLICE]      = -75,
+	[CAR_TYPE_FIRETRUCK]   = -75,
 };
 
 static const float shadowScale[NUM_LAND_CAR_TYPES] =
@@ -231,6 +234,7 @@ static const float shadowScale[NUM_LAND_CAR_TYPES] =
 	[CAR_TYPE_CATAPULT]    = 9.0,
 	[CAR_TYPE_CHARIOT]     = 10.0,
 	[CAR_TYPE_POLICE]      = 11.0,
+	[CAR_TYPE_FIRETRUCK]   = 11.0,
 };
 
 static const int shadowTypes[NUM_LAND_CAR_TYPES] =
@@ -247,6 +251,7 @@ static const int shadowTypes[NUM_LAND_CAR_TYPES] =
 	[CAR_TYPE_CATAPULT]    = SHADOW_TYPE_CAR_CATAPULT,
 	[CAR_TYPE_CHARIOT]     = SHADOW_TYPE_CAR_CHARIOT,
 	[CAR_TYPE_POLICE]      = SHADOW_TYPE_CAR_CHARIOT,
+	[CAR_TYPE_FIRETRUCK]   = SHADOW_TYPE_CAR_CHARIOT,
 };
 
 	carType = gPlayerInfo[playerNum].vehicleType;
@@ -507,7 +512,8 @@ long	oldLeft,oldRight,oldFront,oldBack,oldTop,oldBottom;
 	gFramesPerSecond = oldFPS;											// restore real FPS values
 	gFramesPerSecondFrac = oldFPSFrac;
 
-	if (gPlayerInfo[theNode->PlayerNum].vehicleType == CAR_TYPE_POLICE)
+	if (gPlayerInfo[theNode->PlayerNum].vehicleType == CAR_TYPE_POLICE ||
+		gPlayerInfo[theNode->PlayerNum].vehicleType == CAR_TYPE_FIRETRUCK)
 		UpdatePoliceSirenLights(MODEL_GROUP_CARPARTS);
 
 }
@@ -3423,6 +3429,7 @@ static const OGLPoint3D	wheelOffsets[NUM_LAND_CAR_TYPES][4] =
 	[CAR_TYPE_CATAPULT]    = { {-108,-38,-109},	{108,-38,-109},	{112,-10,105},	{-112,-10,105} },
 	[CAR_TYPE_CHARIOT]     = { {-122,-28,-80},	{122,-28,-80},	{122,-2,85},	{-122,-2,85} },
 	[CAR_TYPE_POLICE]      = { {-104,-27,-160},	{104,-27,-160},	{100,-20,160},	{-100,-20,160} },
+	[CAR_TYPE_FIRETRUCK]   = { {-103,-20,-140},	{103,-20,-140},	{100,-20,155},	{-100,-20,155} },
 	[CAR_TYPE_LIZARD]      = { {-92,-16,-78},	{92,-16,-78},	{86,-12,70},	{-86,-12,70} },
 };
 
@@ -3440,6 +3447,7 @@ static const OGLPoint3D	headOffsets[NUM_LAND_CAR_TYPES] =
 	[CAR_TYPE_CATAPULT]    = { 0, 85, 10 },
 	[CAR_TYPE_CHARIOT]     = { 0, 85, 10 },
 	[CAR_TYPE_POLICE]      = { 0, 42, 12 },
+	[CAR_TYPE_FIRETRUCK]   = { 0, 88, -42 },
 	[CAR_TYPE_LIZARD]      = { 0, 74, 5 },
 };
 

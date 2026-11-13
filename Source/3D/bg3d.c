@@ -893,7 +893,7 @@ void UpdatePoliceSirenLights(int groupNum)
 		if (!mat || !(mat->objectData.flags & BG3D_MATERIALFLAG_EMISSIVE))
 			continue;
 
-		if (emissiveIdx == 0)
+		if ((emissiveIdx & 1) == 0)
 		{
 			mat->objectData.diffuseColor = redOn
 				? (OGLColorRGBA){1.0f, 0.14f, 0.14f, 1.0f}

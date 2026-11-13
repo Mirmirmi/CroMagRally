@@ -689,7 +689,7 @@ short	p;
 
 static void MoveCarModel(ObjNode *theNode)
 {
-	if (theNode->Type == CAR_TYPE_POLICE)
+	if (theNode->Type == CAR_TYPE_POLICE || theNode->Type == CAR_TYPE_FIRETRUCK)
 		UpdatePoliceSirenLights(MODEL_GROUP_CARSELECT);
 	theNode->Rot.y += gFramesPerSecondFrac * 1.5f;
 	UpdateObjectTransforms(theNode);

@@ -26,10 +26,11 @@ static void FreeCharacterSelectArt(void);
 /*    CONSTANTS             */
 /****************************/
 
-#define	ARROW_SCALE		.5
+#define	ARROW_SCALE			.5
 #define CHAR_3D_SPREAD		84.0f
 #define ARROW_2D_SPREAD		193.0f
 #define ARROW_Y				204.0f
+#define NUM_CHARACTER_SLOTS	3
 
 #define GetCharacterArrowHomeX() (ARROW_2D_SPREAD * (gSelectedCharacterIndex - 1))
 
@@ -39,8 +40,10 @@ static void FreeCharacterSelectArt(void);
 /*********************/
 
 static int		gSelectedCharacterIndex;
+static int		gPawPatrolVariant;		// 0 = Chase (sex 2), 1 = Marshall (sex 3)
 
-static ObjNode	*gSex[NUM_PLAYER_CHARACTERS];
+static ObjNode	*gSex[NUM_CHARACTER_SLOTS];
+static ObjNode	*gPawPatrolModels[2];
 static ObjNode	*gCharacterArrow;
 
 static const struct
@@ -50,11 +53,11 @@ static const struct
 	float		x3d;
 	float		nameX2d;
 	float		rotY;
-} kCharacterSlots[NUM_PLAYER_CHARACTERS] =
+} kCharacterSlots[NUM_CHARACTER_SLOTS] =
 {
-	{ SKELETON_TYPE_MALESTANDING,   STR_BROG,  -CHAR_3D_SPREAD, -ARROW_2D_SPREAD, PI },
-	{ SKELETON_TYPE_FEMALESTANDING, STR_GRAG,   0.0f,            0.0f,            PI },
-	{ SKELETON_TYPE_CHASESTANDING,  STR_CHASE,  CHAR_3D_SPREAD,  ARROW_2D_SPREAD, PI - 0.50f },
+	{ SKELETON_TYPE_MALESTANDING,   STR_BROG,       -CHAR_3D_SPREAD, -ARROW_2D_SPREAD, PI },
+	{ SKELETON_TYPE_FEMALESTANDING, STR_GRAG,        0.0f,            0.0f,            PI },
+	{ SKELETON_TYPE_CHASESTANDING,  STR_PAW_PATROL,  CHAR_3D_SPREAD,  ARROW_2D_SPREAD, PI - 0.50f },
 };
 
 
@@ -108,7 +111,9 @@ Boolean DoCharacterSelectScreen(short whichPlayer, Boolean allowAborting)
 
 		/* SET CHARACTER TYPE SELECTED */
 
-	gPlayerInfo[whichPlayer].sex = gSelectedCharacterIndex;
+	gPlayerInfo[whichPlayer].sex = (gSelectedCharacterIndex == 2)
+		? (2 + gPawPatrolVariant)
+		: gSelectedCharacterIndex;
 
 	return(false);
 }
@@ -125,6 +130,7 @@ OGLVector3D			fillDirection1 = { .9, -.3, -1 };
 ObjNode	*multiplayerText = NULL;
 
 	gSelectedCharacterIndex = 0;
+	gPawPatrolVariant = (gPlayerInfo[whichPlayer].sex == 3) ? 1 : 0;
 
 			/**************/
 			/* SETUP VIEW */
@@ -167,8 +173,9 @@ ObjNode	*multiplayerText = NULL;
 
 			/* LOAD SKELETONS */
 
-	for (int i = 0; i < NUM_PLAYER_CHARACTERS; i++)
+	for (int i = 0; i < NUM_CHARACTER_SLOTS; i++)
 		LoadASkeleton(kCharacterSlots[i].skelType);
+	LoadASkeleton(SKELETON_TYPE_MARSHALLSTANDING);
 
 
 
@@ -201,7 +208,7 @@ ObjNode	*multiplayerText = NULL;
 			.scale = .6f,
 			.slot = 99
 		};
-		for (int i = 0; i < NUM_PLAYER_CHARACTERS; i++)
+		for (int i = 0; i < NUM_CHARACTER_SLOTS; i++)
 		{
 			newObjDef_NameString.coord.x = kCharacterSlots[i].nameX2d;
 			TextMesh_New(Localize(kCharacterSlots[i].nameStr), kTextMeshAlignCenter, &newObjDef_NameString);
@@ -211,7 +218,7 @@ ObjNode	*multiplayerText = NULL;
 
 			/* CREATE SELECTABLE CHARACTERS */
 
-	for (int i = 0; i < NUM_PLAYER_CHARACTERS; i++)
+	for (int i = 0; i < NUM_CHARACTER_SLOTS; i++)
 	{
 		NewObjectDefinitionType newObjDef_Character =
 		{
@@ -223,6 +230,23 @@ ObjNode	*multiplayerText = NULL;
 			.scale = .5f
 		};
 		gSex[i] = MakeNewSkeletonObject(&newObjDef_Character);
+	}
+
+	{
+		NewObjectDefinitionType newObjDef_Marshall =
+		{
+			.type = SKELETON_TYPE_MARSHALLSTANDING,
+			.animNum = (gSelectedCharacterIndex == 2) ? 1 : 0,
+			.coord = {kCharacterSlots[2].x3d, 0, 0},
+			.slot = 100,
+			.rot = kCharacterSlots[2].rotY,
+			.scale = .5f
+		};
+		gPawPatrolModels[0] = gSex[2];
+		gPawPatrolModels[1] = MakeNewSkeletonObject(&newObjDef_Marshall);
+		SetObjectVisible(gPawPatrolModels[0], gPawPatrolVariant == 0);
+		SetObjectVisible(gPawPatrolModels[1], gPawPatrolVariant == 1);
+		gSex[2] = gPawPatrolModels[gPawPatrolVariant];
 	}
 
 			/* CREATE ARROW */
@@ -334,8 +358,17 @@ static void CycleSkin(short whichPlayer, int delta)
 
 static void UpdateSelectedCharacterAnim(void)
 {
-	for (int i = 0; i < NUM_PLAYER_CHARACTERS; i++)
+	for (int i = 0; i < NUM_CHARACTER_SLOTS; i++)
 		MorphToSkeletonAnim(gSex[i]->Skeleton, (i == gSelectedCharacterIndex) ? 1 : 0, 5.0);
+}
+
+static void TogglePawPatrolVariant(void)
+{
+	gPawPatrolVariant ^= 1;
+	SetObjectVisible(gPawPatrolModels[0], gPawPatrolVariant == 0);
+	SetObjectVisible(gPawPatrolModels[1], gPawPatrolVariant == 1);
+	gSex[2] = gPawPatrolModels[gPawPatrolVariant];
+	MorphToSkeletonAnim(gSex[2]->Skeleton, (gSelectedCharacterIndex == 2) ? 1 : 0, 5.0);
 }
 
 
@@ -387,7 +420,7 @@ short	p;
 		MakeTwitch(gCharacterArrow, kTwitchPreset_DisplaceRTL);
 	}
 	else
-	if (GetNewNeedState(kNeed_UIRight, p) && (gSelectedCharacterIndex < NUM_PLAYER_CHARACTERS - 1))
+	if (GetNewNeedState(kNeed_UIRight, p) && (gSelectedCharacterIndex < NUM_CHARACTER_SLOTS - 1))
 	{
 		PlayEffect(EFFECT_SELECTCLICK);
 		gSelectedCharacterIndex++;
@@ -396,29 +429,29 @@ short	p;
 		MakeTwitch(gCharacterArrow, kTwitchPreset_DisplaceLTR);
 	}
 	else
-	if (GetNewNeedState(kNeed_UIUp, p))
 	{
-		if (gGameMode != GAME_MODE_CAPTUREFLAG && gSelectedCharacterIndex < 2)
+		int verticalDir = 0;
+		if (GetNewNeedState(kNeed_UIUp, p))
+			verticalDir = 1;
+		else if (GetNewNeedState(kNeed_UIDown, p))
+			verticalDir = -1;
+
+		if (verticalDir != 0)
 		{
-			PlayEffect_Parms(EFFECT_SELECTCLICK, FULL_CHANNEL_VOLUME, FULL_CHANNEL_VOLUME, NORMAL_CHANNEL_RATE * 0.7f);
-			CycleSkin(whichPlayer, 1);
-		}
-		else
-		{
-			PlayEffect(EFFECT_BADSELECT);
-		}
-	}
-	else
-	if (GetNewNeedState(kNeed_UIDown, p))
-	{
-		if (gGameMode != GAME_MODE_CAPTUREFLAG && gSelectedCharacterIndex < 2)
-		{
-			PlayEffect_Parms(EFFECT_SELECTCLICK, FULL_CHANNEL_VOLUME, FULL_CHANNEL_VOLUME, NORMAL_CHANNEL_RATE * 0.7f);
-			CycleSkin(whichPlayer, -1);
-		}
-		else
-		{
-			PlayEffect(EFFECT_BADSELECT);
+			if (gSelectedCharacterIndex == 2)
+			{
+				PlayEffect_Parms(EFFECT_SELECTCLICK, FULL_CHANNEL_VOLUME, FULL_CHANNEL_VOLUME, NORMAL_CHANNEL_RATE * 0.7f);
+				TogglePawPatrolVariant();
+			}
+			else if (gGameMode != GAME_MODE_CAPTUREFLAG && gSelectedCharacterIndex < 2)
+			{
+				PlayEffect_Parms(EFFECT_SELECTCLICK, FULL_CHANNEL_VOLUME, FULL_CHANNEL_VOLUME, NORMAL_CHANNEL_RATE * 0.7f);
+				CycleSkin(whichPlayer, verticalDir);
+			}
+			else
+			{
+				PlayEffect(EFFECT_BADSELECT);
+			}
 		}
 	}
 
