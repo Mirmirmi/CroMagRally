@@ -116,7 +116,13 @@ static const MenuItem gPhysicsMenuTree[] =
 				{STR_CAR_MODEL_11, 10},
 				{STR_CAR_MODEL_12, CAR_TYPE_POLICE},
 				{STR_CAR_MODEL_13, CAR_TYPE_FIRETRUCK},
-				//{STR_CAR_MODEL_14, CAR_TYPE_SUB},	// don't expose submarine
+				{STR_CAR_MODEL_14, CAR_TYPE_RESCUE_ATV},
+				{STR_CAR_MODEL_15, CAR_TYPE_HELICOPTER},
+				{STR_CAR_MODEL_16, CAR_TYPE_SCOOTER},
+				{STR_CAR_MODEL_17, CAR_TYPE_BULLDOZER},
+				{STR_CAR_MODEL_18, CAR_TYPE_HOVERCRAFT},
+				{STR_CAR_MODEL_19, CAR_TYPE_RECYCLING_TRUCK},
+				//{STR_CAR_MODEL_20, CAR_TYPE_SUB},	// don't expose submarine
 			}
 		},
 		.customHeight = 1,

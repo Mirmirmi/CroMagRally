@@ -162,6 +162,13 @@ short		powType;
 		default:
 				DoFatalAlert("VehicleActivatePOW: unknown powType");
 	}
+
+	if (gPlayerInfo[playerNum].sex == SKELETON_TYPE_PLAYER_HUMDINGER &&
+		(powType == POW_TYPE_ROMANCANDLE || powType == POW_TYPE_BOTTLEROCKET ||
+		 powType == POW_TYPE_TORPEDO || powType == POW_TYPE_MINE))
+	{
+		PlayEffect_Parms3D(EFFECT_THROW_HUMDINGER, &gPlayerInfo[playerNum].coord, NORMAL_CHANNEL_RATE, 3.5f);
+	}
 }
 
 
@@ -201,10 +208,13 @@ static void PlayerThrowsWeapon(short playerNum, Boolean forwardThrow)
 		else
 			MorphToSkeletonAnim(head->Skeleton, PLAYER_ANIM_THROWBACKWARD, 8.0);
 
-		if (pinfo->sex == 2 || pinfo->sex == 3)
+		if (pinfo->sex == SKELETON_TYPE_PLAYER_HUMDINGER)
+			PlayEffect_Parms3D(EFFECT_THROW_HUMDINGER, &pinfo->coord, NORMAL_CHANNEL_RATE, 3.5f);
+		else
+		if (pinfo->sex >= SKELETON_TYPE_PLAYER_CHASE && pinfo->sex <= SKELETON_TYPE_PLAYER_ROCKY)
 			PlayEffect_Parms3D(EFFECT_THROW_CHASE, &gCoord, NORMAL_CHANNEL_RATE, 1.5);
 		else
-		if (pinfo->sex)
+		if (pinfo->sex == SKELETON_TYPE_PLAYER_FEMALE)
 			PlayEffect_Parms3D(EFFECT_THROW1 + RandomRange(0,2), &gCoord, NORMAL_CHANNEL_RATE + 0x5000, 1.5);
 		else
 			PlayEffect_Parms3D(EFFECT_THROW1 + RandomRange(0,2), &gCoord, NORMAL_CHANNEL_RATE, 1.5);

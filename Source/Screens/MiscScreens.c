@@ -491,6 +491,13 @@ OGLSetupInputType	viewDef;
 	LoadASkeleton(SKELETON_TYPE_FEMALESTANDING);
 	LoadASkeleton(SKELETON_TYPE_CHASESTANDING);
 	LoadASkeleton(SKELETON_TYPE_MARSHALLSTANDING);
+	LoadASkeleton(SKELETON_TYPE_SKYESTANDING);
+	LoadASkeleton(SKELETON_TYPE_LIBERTYSTANDING);
+	LoadASkeleton(SKELETON_TYPE_RUBBLESTANDING);
+	LoadASkeleton(SKELETON_TYPE_ZUMASTANDING);
+	LoadASkeleton(SKELETON_TYPE_ROCKYSTANDING);
+	LoadASkeleton(SKELETON_TYPE_RYDERSTANDING);
+	LoadASkeleton(SKELETON_TYPE_HUMDINGERSTANDING);
 
 
 			/* LOAD MODELS */
@@ -541,12 +548,13 @@ OGLSetupInputType	viewDef;
 			/* CHARACTER */
 
 	{
+		int winSex = gPlayerInfo[0].sex;
+		if (winSex < 0 || winSex >= NUM_PLAYER_CHARACTERS)
+			winSex = 0;
+
 		NewObjectDefinitionType def =
 		{
-			.type		= (gPlayerInfo[0].sex == 3) ? SKELETON_TYPE_MARSHALLSTANDING :
-						  (gPlayerInfo[0].sex == 2) ? SKELETON_TYPE_CHASESTANDING :
-						  (gPlayerInfo[0].sex == 1) ? SKELETON_TYPE_FEMALESTANDING :
-													  SKELETON_TYPE_MALESTANDING,
+			.type		= SKELETON_TYPE_MALESTANDING + winSex,
 			.animNum	= 2,
 			.coord		= {-900, 120, -200},
 			.flags		= 0,

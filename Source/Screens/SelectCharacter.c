@@ -40,11 +40,46 @@ static void FreeCharacterSelectArt(void);
 /*********************/
 
 static int		gSelectedCharacterIndex;
-static int		gPawPatrolVariant;		// 0 = Chase (sex 2), 1 = Marshall (sex 3)
+static int		gBrogVariant;			// 0..NUM_CAVEMAN_SKINS-1 = Brog skins, +0 = Ryder, +1 = Humdinger
+static int		gPawPatrolVariant;		// 0..NUM_PAW_PATROL_VARIANTS-1
+
+#define NUM_BROG_MODELS			3
+#define NUM_BROG_VARIANTS		(NUM_CAVEMAN_SKINS + 2)
+#define NUM_PAW_PATROL_VARIANTS	7
 
 static ObjNode	*gSex[NUM_CHARACTER_SLOTS];
-static ObjNode	*gPawPatrolModels[2];
+static ObjNode	*gBrogModels[NUM_BROG_MODELS];
+static ObjNode	*gPawPatrolModels[NUM_PAW_PATROL_VARIANTS];
+static ObjNode	*gNameText[NUM_CHARACTER_SLOTS];
 static ObjNode	*gCharacterArrow;
+
+static const uint8_t kBrogStandingSkels[NUM_BROG_MODELS] =
+{
+	SKELETON_TYPE_MALESTANDING,
+	SKELETON_TYPE_RYDERSTANDING,
+	SKELETON_TYPE_HUMDINGERSTANDING,
+};
+
+static const uint8_t kPawPatrolStandingSkels[NUM_PAW_PATROL_VARIANTS] =
+{
+	SKELETON_TYPE_CHASESTANDING,
+	SKELETON_TYPE_MARSHALLSTANDING,
+	SKELETON_TYPE_SKYESTANDING,
+	SKELETON_TYPE_LIBERTYSTANDING,
+	SKELETON_TYPE_RUBBLESTANDING,
+	SKELETON_TYPE_ZUMASTANDING,
+	SKELETON_TYPE_ROCKYSTANDING,
+};
+
+static const float kPawPatrolNameX2d[NUM_PAW_PATROL_VARIANTS] =
+{
+	177.0f, 173.0f, 184.0f, 175.0f, 173.0f, 170.0f, 181.0f
+};
+
+static const float kPawPatrolNameY2d[NUM_PAW_PATROL_VARIANTS] =
+{
+	-118.0f, -130.0f, -118.0f, -120.0f, -130.0f, -126.0f, -126.0f
+};
 
 static const struct
 {
@@ -52,12 +87,13 @@ static const struct
 	LocStrID	nameStr;
 	float		x3d;
 	float		nameX2d;
+	float		nameY2d;
 	float		rotY;
 } kCharacterSlots[NUM_CHARACTER_SLOTS] =
 {
-	{ SKELETON_TYPE_MALESTANDING,   STR_BROG,       -CHAR_3D_SPREAD, -ARROW_2D_SPREAD, PI },
-	{ SKELETON_TYPE_FEMALESTANDING, STR_GRAG,        0.0f,            0.0f,            PI },
-	{ SKELETON_TYPE_CHASESTANDING,  STR_PAW_PATROL,  CHAR_3D_SPREAD,  ARROW_2D_SPREAD, PI - 0.50f },
+	{ SKELETON_TYPE_MALESTANDING,   STR_BROG,       -CHAR_3D_SPREAD, -188.0f, -200.0f, PI },
+	{ SKELETON_TYPE_FEMALESTANDING, STR_GRAG,        0.0f,              0.0f, -194.0f, PI },
+	{ SKELETON_TYPE_CHASESTANDING,  STR_PAW_PATROL,  CHAR_3D_SPREAD,  177.0f, -118.0f, PI - 0.50f },
 };
 
 
@@ -111,11 +147,62 @@ Boolean DoCharacterSelectScreen(short whichPlayer, Boolean allowAborting)
 
 		/* SET CHARACTER TYPE SELECTED */
 
-	gPlayerInfo[whichPlayer].sex = (gSelectedCharacterIndex == 2)
-		? (2 + gPawPatrolVariant)
-		: gSelectedCharacterIndex;
+	if (gSelectedCharacterIndex == 2)
+	{
+		gPlayerInfo[whichPlayer].sex = SKELETON_TYPE_PLAYER_CHASE + gPawPatrolVariant;
+	}
+	else if (gSelectedCharacterIndex == 0)
+	{
+		if (gBrogVariant == NUM_CAVEMAN_SKINS)
+		{
+			gPlayerInfo[whichPlayer].sex = SKELETON_TYPE_PLAYER_RYDER;
+			gPlayerInfo[whichPlayer].skin = 0;
+		}
+		else if (gBrogVariant == NUM_CAVEMAN_SKINS + 1)
+		{
+			gPlayerInfo[whichPlayer].sex = SKELETON_TYPE_PLAYER_HUMDINGER;
+			gPlayerInfo[whichPlayer].skin = 0;
+		}
+		else
+		{
+			gPlayerInfo[whichPlayer].sex = SKELETON_TYPE_PLAYER_MALE;
+		}
+	}
+	else
+	{
+		gPlayerInfo[whichPlayer].sex = SKELETON_TYPE_PLAYER_FEMALE;
+	}
 
 	return(false);
+}
+
+
+static void UpdateCharacterHeaderPositions(void)
+{
+	if (gNameText[0])
+	{
+		if (gBrogVariant == NUM_CAVEMAN_SKINS)
+		{
+			gNameText[0]->Coord.x = -192.0f;
+			gNameText[0]->Coord.y = -178.0f;
+		}
+		else if (gBrogVariant == NUM_CAVEMAN_SKINS + 1)
+		{
+			gNameText[0]->Coord.x = -193.0f;
+			gNameText[0]->Coord.y = -204.0f;
+		}
+		else
+		{
+			gNameText[0]->Coord.x = kCharacterSlots[0].nameX2d;
+			gNameText[0]->Coord.y = kCharacterSlots[0].nameY2d;
+		}
+	}
+
+	if (gNameText[2])
+	{
+		gNameText[2]->Coord.x = kPawPatrolNameX2d[gPawPatrolVariant];
+		gNameText[2]->Coord.y = kPawPatrolNameY2d[gPawPatrolVariant];
+	}
 }
 
 
@@ -130,7 +217,21 @@ OGLVector3D			fillDirection1 = { .9, -.3, -1 };
 ObjNode	*multiplayerText = NULL;
 
 	gSelectedCharacterIndex = 0;
-	gPawPatrolVariant = (gPlayerInfo[whichPlayer].sex == 3) ? 1 : 0;
+	if (gPlayerInfo[whichPlayer].sex >= SKELETON_TYPE_PLAYER_CHASE &&
+		gPlayerInfo[whichPlayer].sex <= SKELETON_TYPE_PLAYER_ROCKY)
+		gPawPatrolVariant = gPlayerInfo[whichPlayer].sex - SKELETON_TYPE_PLAYER_CHASE;
+	else
+		gPawPatrolVariant = 0;
+
+	if (gPlayerInfo[whichPlayer].sex == SKELETON_TYPE_PLAYER_RYDER)
+		gBrogVariant = NUM_CAVEMAN_SKINS;
+	else if (gPlayerInfo[whichPlayer].sex == SKELETON_TYPE_PLAYER_HUMDINGER)
+		gBrogVariant = NUM_CAVEMAN_SKINS + 1;
+	else
+		gBrogVariant = gPlayerInfo[whichPlayer].skin;
+
+	for (int i = 0; i < NUM_CHARACTER_SLOTS; i++)
+		gNameText[i] = NULL;
 
 			/**************/
 			/* SETUP VIEW */
@@ -175,7 +276,10 @@ ObjNode	*multiplayerText = NULL;
 
 	for (int i = 0; i < NUM_CHARACTER_SLOTS; i++)
 		LoadASkeleton(kCharacterSlots[i].skelType);
-	LoadASkeleton(SKELETON_TYPE_MARSHALLSTANDING);
+	LoadASkeleton(SKELETON_TYPE_RYDERSTANDING);
+	LoadASkeleton(SKELETON_TYPE_HUMDINGERSTANDING);
+	for (int i = 1; i < NUM_PAW_PATROL_VARIANTS; i++)
+		LoadASkeleton(kPawPatrolStandingSkels[i]);
 
 
 
@@ -211,8 +315,10 @@ ObjNode	*multiplayerText = NULL;
 		for (int i = 0; i < NUM_CHARACTER_SLOTS; i++)
 		{
 			newObjDef_NameString.coord.x = kCharacterSlots[i].nameX2d;
-			TextMesh_New(Localize(kCharacterSlots[i].nameStr), kTextMeshAlignCenter, &newObjDef_NameString);
+			newObjDef_NameString.coord.y = kCharacterSlots[i].nameY2d;
+			gNameText[i] = TextMesh_New(Localize(kCharacterSlots[i].nameStr), kTextMeshAlignCenter, &newObjDef_NameString);
 		}
+		UpdateCharacterHeaderPositions();
 	}
 
 
@@ -233,19 +339,44 @@ ObjNode	*multiplayerText = NULL;
 	}
 
 	{
-		NewObjectDefinitionType newObjDef_Marshall =
+		int brogModelIdx = (gBrogVariant == NUM_CAVEMAN_SKINS) ? 1 :
+						   (gBrogVariant == NUM_CAVEMAN_SKINS + 1) ? 2 : 0;
+		gBrogModels[0] = gSex[0];
+		for (int i = 1; i < NUM_BROG_MODELS; i++)
 		{
-			.type = SKELETON_TYPE_MARSHALLSTANDING,
-			.animNum = (gSelectedCharacterIndex == 2) ? 1 : 0,
-			.coord = {kCharacterSlots[2].x3d, 0, 0},
-			.slot = 100,
-			.rot = kCharacterSlots[2].rotY,
-			.scale = .5f
-		};
+			NewObjectDefinitionType newObjDef_BrogVar =
+			{
+				.type = kBrogStandingSkels[i],
+				.animNum = (gSelectedCharacterIndex == 0) ? 1 : 0,
+				.coord = {kCharacterSlots[0].x3d, 0, 0},
+				.slot = 100,
+				.rot = kCharacterSlots[0].rotY,
+				.scale = .5f
+			};
+			gBrogModels[i] = MakeNewSkeletonObject(&newObjDef_BrogVar);
+		}
+		for (int i = 0; i < NUM_BROG_MODELS; i++)
+			SetObjectVisible(gBrogModels[i], brogModelIdx == i);
+		gSex[0] = gBrogModels[brogModelIdx];
+	}
+
+	{
 		gPawPatrolModels[0] = gSex[2];
-		gPawPatrolModels[1] = MakeNewSkeletonObject(&newObjDef_Marshall);
-		SetObjectVisible(gPawPatrolModels[0], gPawPatrolVariant == 0);
-		SetObjectVisible(gPawPatrolModels[1], gPawPatrolVariant == 1);
+		for (int i = 1; i < NUM_PAW_PATROL_VARIANTS; i++)
+		{
+			NewObjectDefinitionType newObjDef_Pup =
+			{
+				.type = kPawPatrolStandingSkels[i],
+				.animNum = (gSelectedCharacterIndex == 2) ? 1 : 0,
+				.coord = {kCharacterSlots[2].x3d, 0, 0},
+				.slot = 100,
+				.rot = kCharacterSlots[2].rotY,
+				.scale = .5f
+			};
+			gPawPatrolModels[i] = MakeNewSkeletonObject(&newObjDef_Pup);
+		}
+		for (int i = 0; i < NUM_PAW_PATROL_VARIANTS; i++)
+			SetObjectVisible(gPawPatrolModels[i], gPawPatrolVariant == i);
 		gSex[2] = gPawPatrolModels[gPawPatrolVariant];
 	}
 
@@ -281,7 +412,7 @@ ObjNode	*multiplayerText = NULL;
 	{
 				/* OVERRIDE CHARACTER SKINS */
 
-		gSex[0]->Skeleton->overrideTexture = gCavemanSkins[0][skinID];
+		gBrogModels[0]->Skeleton->overrideTexture = gCavemanSkins[0][skinID];
 		gSex[1]->Skeleton->overrideTexture = gCavemanSkins[1][skinID];
 
 		if (gGameMode == GAME_MODE_CAPTUREFLAG && multiplayerText != NULL)
@@ -340,7 +471,7 @@ static void CycleSkin(short whichPlayer, int delta)
 
 			/* SET TEXTURES */
 
-	gSex[0]->Skeleton->overrideTexture = gCavemanSkins[0][newSkin];
+	gBrogModels[0]->Skeleton->overrideTexture = gCavemanSkins[0][newSkin];
 	gSex[1]->Skeleton->overrideTexture = gCavemanSkins[1][newSkin];
 
 			/* SWAP MY OLD SKIN W/ PLAYER THAT USES THE ONE I WANT */
@@ -362,13 +493,65 @@ static void UpdateSelectedCharacterAnim(void)
 		MorphToSkeletonAnim(gSex[i]->Skeleton, (i == gSelectedCharacterIndex) ? 1 : 0, 5.0);
 }
 
-static void TogglePawPatrolVariant(void)
+static void CycleBrogVariant(short whichPlayer, int delta)
 {
-	gPawPatrolVariant ^= 1;
-	SetObjectVisible(gPawPatrolModels[0], gPawPatrolVariant == 0);
-	SetObjectVisible(gPawPatrolModels[1], gPawPatrolVariant == 1);
+	GAME_ASSERT(whichPlayer < MAX_PLAYERS);
+
+	uint32_t skinsTaken = 0;
+	for (int prevPlayer = 0; prevPlayer < whichPlayer; prevPlayer++)
+	{
+		skinsTaken |= (1 << gPlayerInfo[prevPlayer].skin);
+	}
+
+	int newVar = gBrogVariant;
+	do
+	{
+		newVar = PositiveModulo(newVar + delta, NUM_BROG_VARIANTS);
+	} while (newVar < NUM_CAVEMAN_SKINS && (skinsTaken & (1 << newVar)));
+
+	gBrogVariant = newVar;
+
+	int brogModelIdx = 0;
+	if (newVar == NUM_CAVEMAN_SKINS)
+	{
+		brogModelIdx = 1;
+	}
+	else if (newVar == NUM_CAVEMAN_SKINS + 1)
+	{
+		brogModelIdx = 2;
+	}
+	else
+	{
+		short oldSkin = gPlayerInfo[whichPlayer].skin;
+		short newSkin = (short)newVar;
+		gPlayerInfo[whichPlayer].skin = newSkin;
+		gBrogModels[0]->Skeleton->overrideTexture = gCavemanSkins[0][newSkin];
+		gSex[1]->Skeleton->overrideTexture = gCavemanSkins[1][newSkin];
+		for (int i = 0; i < MAX_PLAYERS; i++)
+		{
+			if (i != whichPlayer && gPlayerInfo[i].skin == newSkin)
+			{
+				gPlayerInfo[i].skin = oldSkin;
+				break;
+			}
+		}
+	}
+
+	for (int i = 0; i < NUM_BROG_MODELS; i++)
+		SetObjectVisible(gBrogModels[i], brogModelIdx == i);
+	gSex[0] = gBrogModels[brogModelIdx];
+	MorphToSkeletonAnim(gSex[0]->Skeleton, (gSelectedCharacterIndex == 0) ? 1 : 0, 5.0);
+	UpdateCharacterHeaderPositions();
+}
+
+static void CyclePawPatrolVariant(int delta)
+{
+	gPawPatrolVariant = PositiveModulo(gPawPatrolVariant + delta, NUM_PAW_PATROL_VARIANTS);
+	for (int i = 0; i < NUM_PAW_PATROL_VARIANTS; i++)
+		SetObjectVisible(gPawPatrolModels[i], gPawPatrolVariant == i);
 	gSex[2] = gPawPatrolModels[gPawPatrolVariant];
 	MorphToSkeletonAnim(gSex[2]->Skeleton, (gSelectedCharacterIndex == 2) ? 1 : 0, 5.0);
+	UpdateCharacterHeaderPositions();
 }
 
 
@@ -441,9 +624,14 @@ short	p;
 			if (gSelectedCharacterIndex == 2)
 			{
 				PlayEffect_Parms(EFFECT_SELECTCLICK, FULL_CHANNEL_VOLUME, FULL_CHANNEL_VOLUME, NORMAL_CHANNEL_RATE * 0.7f);
-				TogglePawPatrolVariant();
+				CyclePawPatrolVariant(verticalDir);
 			}
-			else if (gGameMode != GAME_MODE_CAPTUREFLAG && gSelectedCharacterIndex < 2)
+			else if (gGameMode != GAME_MODE_CAPTUREFLAG && gSelectedCharacterIndex == 0)
+			{
+				PlayEffect_Parms(EFFECT_SELECTCLICK, FULL_CHANNEL_VOLUME, FULL_CHANNEL_VOLUME, NORMAL_CHANNEL_RATE * 0.7f);
+				CycleBrogVariant(whichPlayer, verticalDir);
+			}
+			else if (gGameMode != GAME_MODE_CAPTUREFLAG && gSelectedCharacterIndex == 1)
 			{
 				PlayEffect_Parms(EFFECT_SELECTCLICK, FULL_CHANNEL_VOLUME, FULL_CHANNEL_VOLUME, NORMAL_CHANNEL_RATE * 0.7f);
 				CycleSkin(whichPlayer, verticalDir);
