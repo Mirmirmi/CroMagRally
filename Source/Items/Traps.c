@@ -625,7 +625,28 @@ ObjNode	*newObj;
 
 	newObj->CType 			= CTYPE_MISC|CTYPE_AVOID;
 	newObj->CBits			= CBITS_ALLSOLID;
-	CreateCollisionBoxFromBoundingBox_Maximized(newObj);
+	{
+		OGLMatrix3x3 rotMat;
+		static const LocalCollisionSubBox wheelBoxes[] =
+		{
+			{ -94.4f, -64.0f, -0.3f, 73.0f, -154.2f, -85.8f },
+			{  64.0f,  94.4f, -0.3f, 73.0f, -154.2f, -85.8f },
+			{ -94.4f, -64.0f, -0.3f, 73.0f,   85.8f, 154.2f },
+			{  64.0f,  94.4f, -0.3f, 73.0f,   85.8f, 154.2f },
+		};
+		AllocateCollisionBoxMemory(newObj, 12);
+		OGLMatrix3x3_SetRotate(&rotMat, -newObj->Rot.y);
+		FillRotatedGridSubBoxes(newObj, &rotMat, &newObj->CollisionBoxes[0],
+								-64.0f, 64.0f, 0.0f, 210.0f, -148.0f, 148.0f, 2, 4);
+		for (short i = 0; i < 4; i++)
+		{
+			SetRotatedSubCollisionBox(newObj, &rotMat, &newObj->CollisionBoxes[8 + i],
+									  wheelBoxes[i].minX, wheelBoxes[i].maxX,
+									  wheelBoxes[i].minY, wheelBoxes[i].maxY,
+									  wheelBoxes[i].minZ, wheelBoxes[i].maxZ);
+		}
+		KeepOldCollisionBoxes(newObj);
+	}
 
 	newObj->ThrowRock		= false;
 
@@ -1057,6 +1078,70 @@ OGLPoint3D			pt;
 
 #pragma mark -
 
+/**************** CREATE CANNON COLLISION BOXES *********************/
+/* Builds rotated multi-box collision geometry for EUROPE_ObjType_Cannon so
+   rotated cannons do not have oversized axis-aligned bounds or invisible
+   ground boxes under the elevated muzzle, rear knob, and axle hubs. */
+
+static void CreateCannonCollisionBoxes(ObjNode *theNode)
+{
+	enum
+	{
+		CARRIAGE_COLS = 4,
+		CARRIAGE_ROWS = 6,
+		NUM_EXTRA_BOXES = 5,
+		TOTAL_BOXES = (CARRIAGE_COLS * CARRIAGE_ROWS) + NUM_EXTRA_BOXES,
+	};
+
+	static const float carriageX[CARRIAGE_COLS + 1] = {-300.2f, -150.9f, -1.6f, 147.7f, 297.0f};
+	static const float carriageZ[CARRIAGE_ROWS + 1] = {-504.0f, -350.4f, -196.8f, -43.2f, 110.4f, 264.0f, 417.6f};
+	static const float carriageRearMaxY[CARRIAGE_COLS] = {461.0f, 652.0f, 652.0f, 461.0f};
+
+	typedef struct
+	{
+		float minX, maxX, minY, maxY, minZ, maxZ;
+	} CannonBoxDef;
+
+	static const CannonBoxDef extraBoxes[NUM_EXTRA_BOXES] =
+	{
+		{-170.3f,   -1.6f, 282.5f, 656.1f, -643.4f, -504.0f}, /* muzzle left */
+		{  -1.6f,  167.1f, 282.5f, 656.1f, -643.4f, -504.0f}, /* muzzle right */
+		{ -99.9f,   96.6f, 241.5f, 467.1f,  417.6f,  599.0f}, /* rear knob */
+		{-377.2f, -300.2f, 303.6f, 434.0f,  237.2f,  367.6f}, /* left axle hub */
+		{ 297.0f,  384.1f, 303.6f, 434.0f,  237.2f,  367.6f}, /* right axle hub */
+	};
+
+	OGLMatrix3x3 rotMat;
+	OGLMatrix3x3_SetRotate(&rotMat, -theNode->Rot.y);
+
+	AllocateCollisionBoxMemory(theNode, TOTAL_BOXES);
+	CollisionBoxType *boxes = theNode->CollisionBoxes;
+	int boxIndex = 0;
+
+	for (int col = 0; col < CARRIAGE_COLS; col++)
+	{
+		for (int row = 0; row < CARRIAGE_ROWS; row++)
+		{
+			const float maxY = (row < 3 && (col == 0 || col == CARRIAGE_COLS - 1)) ? 180.0f : carriageRearMaxY[col];
+			SetRotatedSubCollisionBox(theNode, &rotMat, &boxes[boxIndex++],
+									  carriageX[col], carriageX[col + 1],
+									  -30.0f, maxY,
+									  carriageZ[row], carriageZ[row + 1]);
+		}
+	}
+
+	for (int i = 0; i < NUM_EXTRA_BOXES; i++)
+	{
+		const CannonBoxDef *b = &extraBoxes[i];
+		SetRotatedSubCollisionBox(theNode, &rotMat, &boxes[boxIndex++],
+								  b->minX, b->maxX, b->minY, b->maxY, b->minZ, b->maxZ);
+	}
+
+	GAME_ASSERT(boxIndex == TOTAL_BOXES);
+	KeepOldCollisionBoxes(theNode);
+}
+
+
 /********************** ADD CANNON **************************/
 
 Boolean AddCannon(TerrainItemEntryType *itemPtr, long  x, long z)
@@ -1086,7 +1171,7 @@ ObjNode	*newObj;
 
 	newObj->CType 			= CTYPE_MISC|CTYPE_AVOID;
 	newObj->CBits			= CBITS_ALLSOLID;
-	CreateCollisionBoxFromBoundingBox(newObj,1,1);
+	CreateCannonCollisionBoxes(newObj);
 
 
 	newObj->ShootTimer = 0;

@@ -26,8 +26,6 @@ static void MoveViking(ObjNode *theNode);
 /*    CONSTANTS             */
 /****************************/
 
-#define	HENGE_PYLON_RADIUS	900.0f
-
 #define	BEAR_SCALE			3.0f
 #define	VIKING_SCALE		1.6f
 
@@ -438,7 +436,16 @@ ObjNode	*newObj;
 	newObj->CType 			= CTYPE_MISC|CTYPE_AVOID;
 	newObj->CBits			= CBITS_ALLSOLID;
 
-	CreateCollisionBoxFromBoundingBox(newObj, .75f, 1);
+	static const LocalCollisionSubBox headBoxes[] =
+	{
+		{ -230.0f,  230.0f,   1.3f,  220.0f, -449.3f, -180.0f },
+		{ -314.0f,  314.0f,   1.3f,  220.0f, -180.0f,  180.0f },
+		{ -210.0f,  210.0f,   1.3f,  220.0f,  180.0f,  364.9f },
+		{ -260.0f,  260.0f, 220.0f, 1364.5f, -424.0f, -180.0f },
+		{ -373.9f,  373.9f, 220.0f, 1364.5f, -180.0f,  180.0f },
+		{ -260.0f,  260.0f, 220.0f, 1364.5f,  180.0f,  449.3f },
+	};
+	CreateRotatedSubCollisionBoxes(newObj, headBoxes, (short)(sizeof(headBoxes) / sizeof(headBoxes[0])));
 
 	return(true);													// item was added
 }
@@ -618,46 +625,6 @@ ObjNode	*newObj;
 /***************** SET ROTATED SUB-COLLISION BOX ******************/
 /* Builds one world-space AABB in boxes from local bounds rotated by theNode->Rot.y. */
 
-static void SetRotatedSubCollisionBox(const ObjNode *theNode, const OGLMatrix3x3 *rotMat, CollisionBoxType *box,
-									  float minX, float maxX, float minY, float maxY, float minZ, float maxZ)
-{
-	const float xs[2] = {minX * theNode->Scale.x, maxX * theNode->Scale.x};
-	const float zs[2] = {minZ * theNode->Scale.z, maxZ * theNode->Scale.z};
-	float worldMinX = 0.0f, worldMaxX = 0.0f;
-	float worldMinZ = 0.0f, worldMaxZ = 0.0f;
-
-	for (int ix = 0; ix < 2; ix++)
-	{
-		for (int iz = 0; iz < 2; iz++)
-		{
-			OGLPoint2D localPt = {xs[ix], zs[iz]};
-			OGLPoint2D rotPt;
-			OGLPoint2D_Transform(&localPt, rotMat, &rotPt);
-
-			if (ix == 0 && iz == 0)
-			{
-				worldMinX = worldMaxX = rotPt.x;
-				worldMinZ = worldMaxZ = rotPt.y;
-			}
-			else
-			{
-				if (rotPt.x < worldMinX) worldMinX = rotPt.x;
-				if (rotPt.x > worldMaxX) worldMaxX = rotPt.x;
-				if (rotPt.y < worldMinZ) worldMinZ = rotPt.y;
-				if (rotPt.y > worldMaxZ) worldMaxZ = rotPt.y;
-			}
-		}
-	}
-
-	box->left   = (long)floorf(theNode->Coord.x + worldMinX);
-	box->right  = (long)ceilf(theNode->Coord.x + worldMaxX);
-	box->bottom = (long)floorf(theNode->Coord.y + minY * theNode->Scale.y);
-	box->top    = (long)ceilf(theNode->Coord.y + maxY * theNode->Scale.y);
-	box->back   = (long)floorf(theNode->Coord.z + worldMinZ);
-	box->front  = (long)ceilf(theNode->Coord.z + worldMaxZ);
-}
-
-
 /*************** CREATE VIKING SHIP COLLISION BOXES *****************/
 /* Builds multi-box geometry for SCANDINAVIA_ObjType_VikingShip:
    8 slanted support legs (3 tiers each), 7-slice hull + raised ends, and mast,
@@ -828,6 +795,51 @@ ObjNode	*newObj;
 	newObj->CBits			= CBITS_ALLSOLID;
 	if (gTrackNum == TRACK_NUM_SCANDINAVIA)
 		CreateVikingShipCollisionBoxes(newObj);
+	else if (gTrackNum == TRACK_NUM_ATLANTIS)
+	{
+		OGLMatrix3x3 rotMat;
+		AllocateCollisionBoxMemory(newObj, 15);
+		OGLMatrix3x3_SetRotate(&rotMat, -newObj->Rot.y);
+		SetRotatedSubCollisionBox(newObj, &rotMat, &newObj->CollisionBoxes[0],
+								   192.0f,  884.0f,  420.0f, 1100.0f, -1857.0f, -1300.0f);
+		SetRotatedSubCollisionBox(newObj, &rotMat, &newObj->CollisionBoxes[1],
+								  -194.0f,  341.0f, -105.0f, 1336.0f, -1300.0f,  -850.0f);
+		FillRotatedGridSubBoxes(newObj, &rotMat, &newObj->CollisionBoxes[2],
+								-1191.0f,  614.0f, -145.0f, 1196.0f,  -850.0f,  -350.0f, 3, 1);
+		FillRotatedGridSubBoxes(newObj, &rotMat, &newObj->CollisionBoxes[5],
+								 -569.0f,  855.0f, -166.0f, 1252.0f,  -350.0f,   150.0f, 3, 1);
+		FillRotatedGridSubBoxes(newObj, &rotMat, &newObj->CollisionBoxes[8],
+								-1769.0f,  581.0f, -125.0f, 1030.0f,   150.0f,   650.0f, 3, 1);
+		FillRotatedGridSubBoxes(newObj, &rotMat, &newObj->CollisionBoxes[11],
+								-1676.0f,  626.0f, -111.0f,  878.0f,   650.0f,  1150.0f, 3, 1);
+		SetRotatedSubCollisionBox(newObj, &rotMat, &newObj->CollisionBoxes[14],
+								  -139.0f,  576.0f,  100.0f,  800.0f,  1150.0f,  1842.0f);
+		KeepOldCollisionBoxes(newObj);
+	}
+	else if (gTrackNum == TRACK_NUM_CRETE)
+	{
+		static const LocalCollisionSubBox creteBoatBoxes[] =
+		{
+			{  -211.0f,  173.0f,  241.0f,  932.0f, -3990.0f, -3000.0f },
+			{  -736.0f,  699.0f, -114.0f,  425.0f, -3000.0f, -2000.0f },
+			{  -480.0f,  443.0f, -114.0f,  245.0f, -2000.0f,  2000.0f },
+			{ -1198.0f, 1198.0f,  245.0f, 2709.0f, -2000.0f,  2000.0f },
+			{  -742.0f,  699.0f, -114.0f, 1422.0f,  2000.0f,  3000.0f },
+			{  -141.0f,  103.0f, -114.0f,  993.0f,  3000.0f,  3990.0f },
+		};
+		CreateRotatedSubCollisionBoxes(newObj, creteBoatBoxes, (short)(sizeof(creteBoatBoxes) / sizeof(creteBoatBoxes[0])));
+	}
+	else if (gTrackNum == TRACK_NUM_EGYPT)
+	{
+		static const LocalCollisionSubBox egyptBoatBoxes[] =
+		{
+			{ -182.0f, 182.0f, 253.0f, 1866.0f, -3500.0f, -2800.0f },
+			{  -62.0f,  62.0f, -41.0f,  200.0f, -2800.0f,  2800.0f },
+			{ -311.0f, 311.0f, 200.0f, 1866.0f, -2800.0f,  2800.0f },
+			{ -182.0f, 182.0f, 253.0f, 1866.0f,  2800.0f,  3500.0f },
+		};
+		CreateRotatedSubCollisionBoxes(newObj, egyptBoatBoxes, (short)(sizeof(egyptBoatBoxes) / sizeof(egyptBoatBoxes[0])));
+	}
 	else
 		CreateCollisionBoxFromBoundingBox_Rotated(newObj,1,1);
 
@@ -892,10 +904,26 @@ static const short types[NUM_TRACKS][2] =
 	newObj->CType 			= CTYPE_MISC|CTYPE_AVOID;
 	newObj->CBits			= CBITS_ALLSOLID;
 
-	if (gTrackNum == TRACK_NUM_CRETE)
-		CreateCollisionBoxFromBoundingBox_Rotated(newObj, 1, 1);
+	if (gTrackNum == TRACK_NUM_EGYPT && newObj->Type == EGYPT_ObjType_CatStatue)
+	{
+		static const LocalCollisionSubBox catStatueBoxes[] =
+		{
+			{ -324.5f, 328.0f,   0.4f,  244.0f, -339.1f, 335.9f },
+			{ -263.5f, 262.0f, 244.0f, 1343.9f, -452.2f, 573.0f },
+		};
+		CreateRotatedSubCollisionBoxes(newObj, catStatueBoxes, (short)(sizeof(catStatueBoxes) / sizeof(catStatueBoxes[0])));
+	}
+	else if (gTrackNum == TRACK_NUM_EGYPT && newObj->Type == EGYPT_ObjType_Statue)
+	{
+		OGLMatrix3x3 rotMat;
+		AllocateCollisionBoxMemory(newObj, 4);
+		OGLMatrix3x3_SetRotate(&rotMat, -newObj->Rot.y);
+		FillRotatedGridSubBoxes(newObj, &rotMat, newObj->CollisionBoxes,
+								-353.2f, 353.2f, 0.9f, 2195.5f, -359.2f, 359.2f, 2, 2);
+		KeepOldCollisionBoxes(newObj);
+	}
 	else
-		CreateCollisionBoxFromBoundingBox(newObj,1,1);
+		CreateCollisionBoxFromBoundingBox_Rotated(newObj, 1, 1);
 
 	return(true);													// item was added
 }
@@ -930,7 +958,16 @@ ObjNode	*newObj;
 
 	newObj->CType 			= CTYPE_MISC;
 	newObj->CBits			= CBITS_ALLSOLID;
-	CreateCollisionBoxFromBoundingBox(newObj,1,1);
+	static const LocalCollisionSubBox sphinxBoxes[] =
+	{
+		{ -1033.5f, 1033.5f,   1.5f,  260.0f, -1208.8f, -352.5f },
+		{  -820.0f,  820.0f,   1.5f, 1546.0f,  -352.5f,  150.0f },
+		{  -600.0f,  600.0f,   1.5f,  800.0f,   150.0f,  650.0f },
+		{  -390.0f,  390.0f,   1.5f,  490.0f,   650.0f, 1150.0f },
+		{  -220.0f,  220.0f,   1.5f,  260.0f,  1150.0f, 1596.4f },
+		{ -1319.1f, 1319.1f, 260.0f, 2023.2f, -1664.6f, -352.5f },
+	};
+	CreateRotatedSubCollisionBoxes(newObj, sphinxBoxes, (short)(sizeof(sphinxBoxes) / sizeof(sphinxBoxes[0])));
 
 	return(true);													// item was added
 }
@@ -1359,7 +1396,30 @@ Boolean	isSolid = itemPtr->parm[3] & 1;						// see if solid or not
 	{
 		newObj->CType 			= CTYPE_MISC|CTYPE_AVOID;
 		newObj->CBits			= CBITS_ALLSOLID;
-		CreateCollisionBoxFromBoundingBox_Maximized(newObj);
+		if (newObj->Type == EUROPE_ObjType_SiegeTower)
+		{
+			OGLMatrix3x3 rotMat;
+			AllocateCollisionBoxMemory(newObj, 16);
+			OGLMatrix3x3_SetRotate(&rotMat, -newObj->Rot.y);
+			FillRotatedGridSubBoxes(newObj, &rotMat, newObj->CollisionBoxes,
+									-424.7f, 424.7f, -1.3f, 1384.7f, -514.1f, 514.1f, 4, 4);
+			KeepOldCollisionBoxes(newObj);
+		}
+		else if (newObj->Type == EUROPE_ObjType_Cannon)
+		{
+			OGLMatrix3x3 rotMat;
+			AllocateCollisionBoxMemory(newObj, 12);
+			OGLMatrix3x3_SetRotate(&rotMat, -newObj->Rot.y);
+			FillRotatedGridSubBoxes(newObj, &rotMat, &newObj->CollisionBoxes[0],
+									-300.2f, 297.0f, 0.0f, 260.0f, -504.0f, 417.6f, 2, 3);
+			FillRotatedGridSubBoxes(newObj, &rotMat, &newObj->CollisionBoxes[6],
+									-377.2f, 384.1f, 260.0f, 656.1f, -643.4f, 599.0f, 2, 3);
+			KeepOldCollisionBoxes(newObj);
+		}
+		else
+		{
+			CreateCollisionBoxFromBoundingBox_Rotated(newObj, 1, 1);
+		}
 	}
 
 	return(true);													// item was added
@@ -1474,7 +1534,70 @@ short	type = SDL_clamp(itemPtr->parm[0], 0, 3);
 	{
 		newObj->CType 			= CTYPE_MISC|CTYPE_AVOID;
 		newObj->CBits			= CBITS_ALLSOLID;
-		CreateCollisionBoxFromBoundingBox_Rotated(newObj,info[gTrackNum].tweakXZ[type],info[gTrackNum].tweakY[type]);
+		if (gTrackNum == TRACK_NUM_EUROPE && newObj->Type == EUROPE_ObjType_TownHouse)
+		{
+			OGLMatrix3x3 rotMat;
+			AllocateCollisionBoxMemory(newObj, 32);
+			OGLMatrix3x3_SetRotate(&rotMat, -newObj->Rot.y);
+			FillRotatedGridSubBoxes(newObj, &rotMat, &newObj->CollisionBoxes[0],
+									-1212.8f, 1212.8f, -29.4f, 600.0f, -1247.4f, 831.6f, 4, 4);
+			FillRotatedGridSubBoxes(newObj, &rotMat, &newObj->CollisionBoxes[16],
+									-1316.7f, 1316.7f, 600.0f, 3712.8f, -1351.3f, 1351.3f, 4, 4);
+			KeepOldCollisionBoxes(newObj);
+		}
+		else if (gTrackNum == TRACK_NUM_SCANDINAVIA && newObj->Type == SCANDINAVIA_ObjType_Cabin1)
+		{
+			OGLMatrix3x3 rotMat;
+			AllocateCollisionBoxMemory(newObj, 8);
+			OGLMatrix3x3_SetRotate(&rotMat, -newObj->Rot.y);
+			SetRotatedSubCollisionBox(newObj, &rotMat, &newObj->CollisionBoxes[0],
+									  -551.1f, 551.1f, 0.3f, 1043.0f, -1404.4f, -1000.0f);
+			FillRotatedGridSubBoxes(newObj, &rotMat, &newObj->CollisionBoxes[1],
+									-1330.4f, 1330.4f, 0.3f, 1393.2f, -1000.0f, 1000.0f, 3, 2);
+			SetRotatedSubCollisionBox(newObj, &rotMat, &newObj->CollisionBoxes[7],
+									  -551.1f, 551.1f, 0.3f, 1043.0f, 1000.0f, 1404.4f);
+			KeepOldCollisionBoxes(newObj);
+		}
+		else if (gTrackNum == TRACK_NUM_SCANDINAVIA && newObj->Type == SCANDINAVIA_ObjType_Cabin2)
+		{
+			OGLMatrix3x3 rotMat;
+			AllocateCollisionBoxMemory(newObj, 16);
+			OGLMatrix3x3_SetRotate(&rotMat, -newObj->Rot.y);
+			FillRotatedGridSubBoxes(newObj, &rotMat, &newObj->CollisionBoxes[0],
+									-720.0f, 720.0f, -2.6f, 240.0f, -1170.0f, 1170.0f, 2, 4);
+			FillRotatedGridSubBoxes(newObj, &rotMat, &newObj->CollisionBoxes[8],
+									-835.2f, 835.2f, 240.0f, 1428.4f, -1240.2f, 1240.2f, 2, 4);
+			KeepOldCollisionBoxes(newObj);
+		}
+		else if (gTrackNum == TRACK_NUM_SCANDINAVIA && newObj->Type == SCANDINAVIA_ObjType_Cabin3)
+		{
+			OGLMatrix3x3 rotMat;
+			AllocateCollisionBoxMemory(newObj, 16);
+			OGLMatrix3x3_SetRotate(&rotMat, -newObj->Rot.y);
+			FillRotatedGridSubBoxes(newObj, &rotMat, &newObj->CollisionBoxes[0],
+									-720.0f, 720.0f, -2.4f, 240.0f, -1260.0f, 1260.0f, 2, 4);
+			FillRotatedGridSubBoxes(newObj, &rotMat, &newObj->CollisionBoxes[8],
+									-760.0f, 760.0f, 240.0f, 1655.1f, -1330.2f, 1330.2f, 2, 4);
+			KeepOldCollisionBoxes(newObj);
+		}
+		else if (gTrackNum == TRACK_NUM_ATLANTIS && newObj->Type == ATLANTIS_ObjType_SaucerDome)
+		{
+			static const LocalCollisionSubBox saucerDomeBoxes[] =
+			{
+				{ -1170.0f, 1170.0f,    2.3f,  720.0f,  -450.0f,  450.0f },
+				{  -450.0f,  450.0f,    2.3f,  720.0f, -1170.0f, 1170.0f },
+				{  -830.0f,  830.0f,    2.3f,  720.0f,  -830.0f,  830.0f },
+				{ -2916.0f, 2916.0f,  720.0f, 1550.0f, -1116.0f, 1116.0f },
+				{ -1116.0f, 1116.0f,  720.0f, 1550.0f, -2916.0f, 2916.0f },
+				{ -2062.0f, 2062.0f,  720.0f, 1550.0f, -2062.0f, 2062.0f },
+				{ -1712.0f, 1712.0f, 1550.0f, 2400.0f, -1712.0f, 1712.0f },
+			};
+			CreateRotatedSubCollisionBoxes(newObj, saucerDomeBoxes, (short)(sizeof(saucerDomeBoxes) / sizeof(saucerDomeBoxes[0])));
+		}
+		else
+		{
+			CreateCollisionBoxFromBoundingBox_Rotated(newObj,info[gTrackNum].tweakXZ[type],info[gTrackNum].tweakY[type]);
+		}
 	}
 
 	return(true);													// item was added
@@ -1633,6 +1756,187 @@ ObjNode	*newObj;
 
 #pragma mark -
 
+typedef struct
+{
+	float x;
+	float z;
+} StoneQuadVertex;
+
+typedef struct
+{
+	StoneQuadVertex verts[4];	/* base footprint quad in local XZ */
+	float			minY;
+	float			maxY;
+	int				nz;
+	int				nx;
+} StonePylonSpec;
+
+static void GetQuadXRangeForSlab(const StoneQuadVertex verts[4], float z0, float z1,
+								 float *outMinX, float *outMaxX)
+{
+	float minX = 0.0f;
+	float maxX = 0.0f;
+	Boolean initialized = false;
+
+	for (int i = 0; i < 4; i++)
+	{
+		const StoneQuadVertex *a = &verts[i];
+		const StoneQuadVertex *b = &verts[(i + 1) & 3];
+
+		if ((a->z >= z0) && (a->z <= z1))
+		{
+			if (!initialized)
+			{
+				minX = maxX = a->x;
+				initialized = true;
+			}
+			else
+			{
+				if (a->x < minX) minX = a->x;
+				if (a->x > maxX) maxX = a->x;
+			}
+		}
+
+		const float dz = b->z - a->z;
+		if (fabsf(dz) > 1e-4f)
+		{
+			const float cuts[2] = {z0, z1};
+			for (int c = 0; c < 2; c++)
+			{
+				const float zc = cuts[c];
+				if (((a->z < zc) && (b->z > zc)) || ((b->z < zc) && (a->z > zc)))
+				{
+					const float x = a->x + ((zc - a->z) / dz) * (b->x - a->x);
+					if (!initialized)
+					{
+						minX = maxX = x;
+						initialized = true;
+					}
+					else
+					{
+						if (x < minX) minX = x;
+						if (x > maxX) maxX = x;
+					}
+				}
+			}
+		}
+	}
+
+	*outMinX = minX;
+	*outMaxX = maxX;
+}
+
+static int AppendStonePylonBoxes(const ObjNode *theNode, const OGLMatrix3x3 *rotMat,
+								 const StonePylonSpec *spec, CollisionBoxType *outBoxes, int maxBoxes)
+{
+	float zMin = spec->verts[0].z;
+	float zMax = spec->verts[0].z;
+	for (int i = 1; i < 4; i++)
+	{
+		if (spec->verts[i].z < zMin) zMin = spec->verts[i].z;
+		if (spec->verts[i].z > zMax) zMax = spec->verts[i].z;
+	}
+
+	int count = 0;
+	const float dz = (zMax - zMin) / (float)spec->nz;
+	for (int iz = 0; iz < spec->nz; iz++)
+	{
+		const float za = zMin + (float)iz * dz;
+		const float zb = (iz == spec->nz - 1) ? zMax : (za + dz);
+		float xa, xb;
+		GetQuadXRangeForSlab(spec->verts, za, zb, &xa, &xb);
+
+		if (xb <= xa)
+			continue;
+
+		const float dx = (xb - xa) / (float)spec->nx;
+		for (int ix = 0; ix < spec->nx; ix++)
+		{
+			const float x0 = xa + (float)ix * dx;
+			const float x1 = (ix == spec->nx - 1) ? xb : (x0 + dx);
+			GAME_ASSERT(count < maxBoxes);
+			SetRotatedSubCollisionBox(theNode, rotMat, &outBoxes[count++],
+									  x0, x1, spec->minY, spec->maxY, za, zb);
+		}
+	}
+
+	return count;
+}
+
+static void CreateStoneHengeCollisionBoxes(ObjNode *theNode, short type)
+{
+	/* Base footprints extracted from Data/Models/stonehenge.bg3d so all stone
+	   volumes remain solid at every rotation without oversized axis-aligned bounds. */
+	static const StonePylonSpec postSpec =
+	{
+		.verts = {{-568.9f, -617.2f}, {556.1f, -542.2f}, {568.9f, 617.2f}, {-506.4f, 616.2f}},
+		.minY  = -30.0f,
+		.maxY  = 3160.0f,
+		.nz    = 3,
+		.nx    = 3,
+	};
+
+	/* Fine Z slicing keeps 45-degree rotated AABB overhang out of the archway so cars
+	   (width 240) pass cleanly through InnerHenge openings while keeping 0 interior gaps. */
+	static const StonePylonSpec innerSpecs[2] =
+	{
+		{
+			.verts = {{-2026.3f, -659.5f}, {-251.8f, -681.6f}, {-351.0f, 538.3f}, {-2356.9f, 802.7f}},
+			.minY  = -30.0f,
+			.maxY  = 7430.0f,
+			.nz    = 24,
+			.nx    = 3,
+		},
+		{
+			.verts = {{271.7f, -477.7f}, {2277.6f, -742.2f}, {1947.0f, 720.1f}, {172.5f, 742.2f}},
+			.minY  = -30.0f,
+			.maxY  = 7430.0f,
+			.nz    = 24,
+			.nx    = 3,
+		},
+	};
+
+	static const StonePylonSpec outerSpec =
+	{
+		.verts = {{-1239.0f, -882.4f}, {1135.8f, -913.4f}, {1239.0f, 748.2f}, {-1104.8f, 913.4f}},
+		.minY  = -30.0f,
+		.maxY  = 6495.0f,
+		.nz    = 5,
+		.nx    = 6,
+	};
+
+	enum { MAX_HENGE_BOXES = 160 };
+	CollisionBoxType tempBoxes[MAX_HENGE_BOXES];
+	int count = 0;
+
+	OGLMatrix3x3 rotMat;
+	OGLMatrix3x3_SetRotate(&rotMat, -theNode->Rot.y);
+
+	switch (type)
+	{
+		case 0: /* post */
+			count = AppendStonePylonBoxes(theNode, &rotMat, &postSpec, tempBoxes, MAX_HENGE_BOXES);
+			break;
+
+		case 1: /* inner */
+			count += AppendStonePylonBoxes(theNode, &rotMat, &innerSpecs[0], tempBoxes + count, MAX_HENGE_BOXES - count);
+			count += AppendStonePylonBoxes(theNode, &rotMat, &innerSpecs[1], tempBoxes + count, MAX_HENGE_BOXES - count);
+			break;
+
+		case 2: /* outer */
+			count = AppendStonePylonBoxes(theNode, &rotMat, &outerSpec, tempBoxes, MAX_HENGE_BOXES);
+			break;
+
+		default:
+			CreateCollisionBoxFromBoundingBox(theNode, 1, 1);
+			return;
+	}
+
+	AllocateCollisionBoxMemory(theNode, (short)count);
+	SDL_memcpy(theNode->CollisionBoxes, tempBoxes, (size_t)count * sizeof(CollisionBoxType));
+	KeepOldCollisionBoxes(theNode);
+}
+
 /********************** ADD STONEHENGE **************************/
 
 Boolean AddStoneHenge(TerrainItemEntryType *itemPtr, long  x, long z)
@@ -1664,60 +1968,7 @@ short	type = itemPtr->parm[0];
 	newObj->CType 			= CTYPE_MISC|CTYPE_AVOID;
 	newObj->CBits			= CBITS_ALLSOLID;
 
-	switch(type)
-	{
-		case	0:			// pose
-				CreateCollisionBoxFromBoundingBox(newObj,1,1);
-				break;
-
-		case	1:			// inner
-
-				{
-					CollisionBoxType *boxPtr;
-					OGLPoint2D		p,p1,p2;
-					OGLMatrix3x3	m;
-
-						/* CALC COORDS OF EACH PYLON */
-
-					OGLMatrix3x3_SetRotate(&m, -newObj->Rot.y);
-
-					p.x = -1300;
-					p.y = 0;
-					OGLPoint2D_Transform(&p, &m, &p1);				// calc left
-					p.x = -p.x;
-					OGLPoint2D_Transform(&p, &m, &p2);				// calc right
-
-							/* BUILD 2 COLLISION BOXES */
-
-					AllocateCollisionBoxMemory(newObj, 2);					// alloc 2 collision boxes
-					boxPtr = newObj->CollisionBoxes;						// get ptr to boxes
-
-					boxPtr[0].left 		= newObj->Coord.x + p1.x - HENGE_PYLON_RADIUS;
-					boxPtr[0].right 	= newObj->Coord.x + p1.x + HENGE_PYLON_RADIUS;
-					boxPtr[0].top 		= newObj->Coord.y + 6000.0;
-					boxPtr[0].bottom 	= newObj->Coord.y - 10.0f;
-					boxPtr[0].back 		= newObj->Coord.z + p1.y - HENGE_PYLON_RADIUS;
-					boxPtr[0].front 	= newObj->Coord.z + p1.y + HENGE_PYLON_RADIUS;
-
-					boxPtr[1].left 		= newObj->Coord.x + p2.x - HENGE_PYLON_RADIUS;
-					boxPtr[1].right 	= newObj->Coord.x + p2.x + HENGE_PYLON_RADIUS;
-					boxPtr[1].top 		= newObj->Coord.y + 6000.0;
-					boxPtr[1].bottom 	= newObj->Coord.y - 10.0f;
-					boxPtr[1].back 		= newObj->Coord.z + p2.y - HENGE_PYLON_RADIUS;
-					boxPtr[1].front 	= newObj->Coord.z + p2.y + HENGE_PYLON_RADIUS;
-
-
-
-					KeepOldCollisionBoxes(newObj);
-				}
-				break;
-
-		case	2:			// outer
-				SetObjectCollisionBounds(newObj, 6000, -10, -HENGE_PYLON_RADIUS, HENGE_PYLON_RADIUS, HENGE_PYLON_RADIUS, -HENGE_PYLON_RADIUS);
-				break;
-
-	}
-
+	CreateStoneHengeCollisionBoxes(newObj, type);
 
 
 	return(true);													// item was added
