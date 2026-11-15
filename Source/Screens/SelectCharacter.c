@@ -78,7 +78,7 @@ static const float kPawPatrolNameX2d[NUM_PAW_PATROL_VARIANTS] =
 
 static const float kPawPatrolNameY2d[NUM_PAW_PATROL_VARIANTS] =
 {
-	-118.0f, -130.0f, -118.0f, -120.0f, -130.0f, -126.0f, -126.0f
+	-194.0f, -194.0f, -194.0f, -194.0f, -194.0f, -194.0f, -194.0f
 };
 
 static const struct
@@ -91,9 +91,9 @@ static const struct
 	float		rotY;
 } kCharacterSlots[NUM_CHARACTER_SLOTS] =
 {
-	{ SKELETON_TYPE_MALESTANDING,   STR_BROG,       -CHAR_3D_SPREAD, -188.0f, -200.0f, PI },
+	{ SKELETON_TYPE_MALESTANDING,   STR_BROG,       -CHAR_3D_SPREAD, -188.0f, -194.0f, PI },
 	{ SKELETON_TYPE_FEMALESTANDING, STR_GRAG,        0.0f,              0.0f, -194.0f, PI },
-	{ SKELETON_TYPE_CHASESTANDING,  STR_PAW_PATROL,  CHAR_3D_SPREAD,  177.0f, -118.0f, PI - 0.50f },
+	{ SKELETON_TYPE_CHASESTANDING,  STR_PAW_PATROL,  CHAR_3D_SPREAD,  177.0f, -194.0f, PI - 0.50f },
 };
 
 
@@ -184,12 +184,12 @@ static void UpdateCharacterHeaderPositions(void)
 		if (gBrogVariant == NUM_CAVEMAN_SKINS)
 		{
 			gNameText[0]->Coord.x = -192.0f;
-			gNameText[0]->Coord.y = -178.0f;
+			gNameText[0]->Coord.y = kCharacterSlots[0].nameY2d;
 		}
 		else if (gBrogVariant == NUM_CAVEMAN_SKINS + 1)
 		{
 			gNameText[0]->Coord.x = -193.0f;
-			gNameText[0]->Coord.y = -204.0f;
+			gNameText[0]->Coord.y = kCharacterSlots[0].nameY2d;
 		}
 		else
 		{
