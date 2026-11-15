@@ -131,7 +131,7 @@ static const MenuItem gHostLobbyMenuTree[] =
 	{kMILabel, STR_NULL, .id=5, .getDynamicText=GetPlayerRowText, .getLayoutFlags=IsPlayerRowHidden, .customHeight=0.55f },
 	{kMISpacer, .customHeight=0.5f },
 	{
-		kMICycler2, STR_CPU_PLAYERS, .callback=OnHostSettingChanged, .cycler=
+		kMICycler1, STR_CPU_PLAYERS, .callback=OnHostSettingChanged, .cycler=
 		{
 			.valuePtr=&gMultiplayerCPUs, .choices=
 			{
@@ -141,7 +141,7 @@ static const MenuItem gHostLobbyMenuTree[] =
 		}
 	},
 	{
-		kMICycler2, STR_DIFFICULTY, .callback=OnHostSettingChanged, .cycler=
+		kMICycler1, STR_DIFFICULTY, .callback=OnHostSettingChanged, .cycler=
 		{
 			.valuePtr=&gGamePrefs.difficulty, .choices=
 			{
@@ -152,7 +152,9 @@ static const MenuItem gHostLobbyMenuTree[] =
 			}
 		}
 	},
-	{kMISpacer, .customHeight=0.5f },
+	{kMISpacer, .customHeight=0.45f },
+	{kMILabel, STR_WAIT_FOR_PLAYERS_OR_START, .customHeight=0.55f },
+	{kMISpacer, .customHeight=0.25f },
 	{kMIPick, STR_START_MATCH, .id=1, .next='EXIT' },
 	{kMIPick, STR_CANCEL,      .id=0, .next='EXIT' },
 	{ .type=kMISENTINEL }
