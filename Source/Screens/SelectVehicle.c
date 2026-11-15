@@ -415,7 +415,7 @@ int					age;
 	else
 		gNumVehiclesToChooseFrom = 7 + (age * 2);			// set # cars we can pick from
 
-	if ((gNumRealPlayers > 1) || IsBattleGameMode(gGameMode))	// let use any car in multiplayer/battle modes
+	if ((gNumRealPlayers > 1) || IsBattleGameMode(gGameMode) || gNetGameInProgress)	// let use any car in multiplayer/battle/net modes
 		gNumVehiclesToChooseFrom = NUM_LAND_CAR_TYPES;
 
 			/**************/
