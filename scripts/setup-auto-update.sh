@@ -69,7 +69,7 @@ EOF
   <key>RunAtLoad</key>
   <true/>
   <key>StartInterval</key>
-  <integer>1800</integer>
+  <integer>900</integer>
   <key>StandardOutPath</key>
   <string>${LOG_FILE}</string>
   <key>StandardErrorPath</key>
@@ -146,7 +146,7 @@ Description=Periodically check for Cro-Mag Rally updates
 
 [Timer]
 OnBootSec=2min
-OnUnitActiveSec=30min
+OnUnitActiveSec=15min
 Persistent=true
 
 [Install]

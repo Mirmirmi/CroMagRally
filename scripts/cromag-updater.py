@@ -61,16 +61,22 @@ def http_get_json(url: str, timeout: float) -> dict[str, Any]:
         return json.loads(resp.read().decode("utf-8"))
 
 
-def download_file(url: str, dest: Path, timeout: float) -> str:
+def download_file(url: str, dest: Path, timeout: float, on_progress=None) -> str:
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     h = hashlib.sha256()
     with urllib.request.urlopen(req, timeout=timeout) as resp, dest.open("wb") as out:
+        total_header = resp.headers.get("Content-Length")
+        total_bytes = int(total_header) if total_header and total_header.isdigit() else 0
+        downloaded = 0
         while True:
             chunk = resp.read(1024 * 1024)
             if not chunk:
                 break
             h.update(chunk)
             out.write(chunk)
+            downloaded += len(chunk)
+            if on_progress:
+                on_progress(downloaded, total_bytes)
     return h.hexdigest()
 
 
@@ -215,7 +221,7 @@ def needs_update(
 @contextlib.contextmanager
 def progress_ui(enabled: bool, tag: str):
     if not enabled:
-        yield
+        yield None
         return
 
     system = platform.system()
@@ -226,22 +232,45 @@ def progress_ui(enabled: bool, tag: str):
                 [
                     zenity,
                     "--progress",
-                    "--pulsate",
+                    "--percentage=0",
                     "--auto-close",
                     "--no-cancel",
                     "--title=Cro-Mag Rally",
-                    f"--text=Updating Cro-Mag Rally to {tag}...",
+                    f"--text=Downloading Cro-Mag Rally {tag}...",
                 ],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
+            last_pct = -1
+
+            def update_progress(downloaded: int, total: int) -> None:
+                nonlocal last_pct
+                if not proc.stdin or proc.poll() is not None:
+                    return
+                if total > 0:
+                    pct = min(99, int(downloaded * 99 / total))
+                    text = f"# Downloading Cro-Mag Rally {tag} ({downloaded // (1024 * 1024)} / {total // (1024 * 1024)} MB)..."
+                else:
+                    pct = 0
+                    text = f"# Downloading Cro-Mag Rally {tag} ({downloaded // (1024 * 1024)} MB)..."
+                if pct != last_pct or total == 0:
+                    last_pct = pct
+                    with contextlib.suppress(Exception):
+                        proc.stdin.write(f"{pct}\n{text}\n".encode("utf-8"))
+                        proc.stdin.flush()
+
+            with contextlib.suppress(Exception):
+                if proc.stdin:
+                    proc.stdin.write(f"0\n# Downloading Cro-Mag Rally {tag}...\n".encode("utf-8"))
+                    proc.stdin.flush()
             try:
-                yield
+                yield update_progress
             finally:
                 with contextlib.suppress(Exception):
                     if proc.stdin:
                         proc.stdin.write(b"100\n")
+                        proc.stdin.flush()
                         proc.stdin.close()
                     proc.wait(timeout=2)
             return
@@ -257,7 +286,7 @@ def progress_ui(enabled: bool, tag: str):
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-    yield
+    yield None
 
 
 def install_macos(dmg_path: Path, install_path: Path) -> None:
@@ -342,15 +371,24 @@ def perform_update(
         return False
 
     log(f"Updating Cro-Mag Rally ({reason}) from {remote['download_url']}")
-    with progress_ui(gui, remote["tag"]):
+    with progress_ui(gui, remote["tag"]) as on_progress:
         with tempfile.TemporaryDirectory(prefix="cromag-dl-") as tmp_dir:
             dl_path = Path(tmp_dir) / remote["asset_name"]
-            actual_sha = download_file(remote["download_url"], dl_path, timeout=max(timeout, 120.0))
+            actual_sha = download_file(
+                remote["download_url"],
+                dl_path,
+                timeout=max(timeout, 120.0),
+                on_progress=on_progress,
+            )
             expected_sha = remote.get("sha256")
             if expected_sha and actual_sha != expected_sha:
                 raise RuntimeError(
                     f"SHA-256 mismatch for {remote['asset_name']}: expected {expected_sha}, got {actual_sha}"
                 )
+
+            if is_game_running():
+                log(f"{PROCESS_NAME} started during download; deferring install of {remote['tag']}.")
+                return False
 
             if platform.system() == "Darwin":
                 install_macos(dl_path, install_path)
@@ -464,6 +502,12 @@ def main() -> int:
         return 0
 
     # launch mode: update best-effort (never block offline play if already installed)
+    if is_game_running():
+        if platform.system() == "Darwin":
+            return launch_game(install_path, args.game_args)
+        log(f"{PROCESS_NAME} is already running; not launching a duplicate instance.")
+        return 0
+
     with file_lock(lock_path):
         try:
             perform_update(
@@ -476,6 +520,10 @@ def main() -> int:
             )
         except Exception as exc:
             log(f"Pre-launch update check failed ({exc}); launching existing install.")
+
+    if is_game_running() and platform.system() != "Darwin":
+        log(f"{PROCESS_NAME} started while updating; not launching a duplicate instance.")
+        return 0
 
     return launch_game(install_path, args.game_args)
 
