@@ -9,18 +9,26 @@ OS="$(uname -s)"
 
 if [[ "${OS}" == "Darwin" ]]; then
   SUPPORT_DIR="${HOME}/Library/Application Support/CroMagRally"
+  APP_INSTALL_PATH="${SUPPORT_DIR}/Cro-Mag Rally.app"
   UPDATER_DST="${SUPPORT_DIR}/cromag-updater.py"
   LOG_FILE="${HOME}/Library/Logs/CroMagRally-updater.log"
   PLIST_DIR="${HOME}/Library/LaunchAgents"
   PLIST_PATH="${PLIST_DIR}/io.jor.cromagrally.updater.plist"
-  LAUNCHER_APP="/Applications/Play Cro-Mag Rally.app"
+  LAUNCHER_APP="/Applications/Cro-Mag Rally.app"
+  OLD_LAUNCHER_APP="/Applications/Play Cro-Mag Rally.app"
 
   mkdir -p "${SUPPORT_DIR}" "${PLIST_DIR}" "$(dirname "${LOG_FILE}")"
+  touch "${SUPPORT_DIR}/.metadata_never_index"
   cp "${UPDATER_SRC}" "${UPDATER_DST}"
   chmod 0755 "${UPDATER_DST}"
 
-  # Build a lightweight native .app launcher that runs a pre-launch check then opens Cro-Mag Rally.app
-  rm -rf "${LAUNCHER_APP}"
+  # Migrate an existing game bundle out of /Applications so Spotlight only sees one Cro-Mag Rally.app
+  if [[ -e "${LAUNCHER_APP}/Contents/MacOS/CroMagRally" && ! -e "${APP_INSTALL_PATH}" ]]; then
+    mv "${LAUNCHER_APP}" "${APP_INSTALL_PATH}"
+  fi
+  rm -rf "${OLD_LAUNCHER_APP}" "${LAUNCHER_APP}"
+
+  # Build /Applications/Cro-Mag Rally.app as the single launcher that checks for updates before starting the game
   mkdir -p "${LAUNCHER_APP}/Contents/MacOS" "${LAUNCHER_APP}/Contents/Resources"
   cp "${REPO_ROOT}/packaging/CroMagRally.icns" "${LAUNCHER_APP}/Contents/Resources/CroMagRally.icns"
 
@@ -30,13 +38,15 @@ if [[ "${OS}" == "Darwin" ]]; then
 <plist version="1.0">
 <dict>
   <key>CFBundleExecutable</key>
-  <string>PlayCroMagRally</string>
+  <string>CroMagRallyLauncher</string>
   <key>CFBundleIconFile</key>
   <string>CroMagRally.icns</string>
   <key>CFBundleIdentifier</key>
   <string>io.jor.cromagrally.launcher</string>
   <key>CFBundleName</key>
-  <string>Play Cro-Mag Rally</string>
+  <string>Cro-Mag Rally</string>
+  <key>CFBundleDisplayName</key>
+  <string>Cro-Mag Rally</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
@@ -47,11 +57,34 @@ if [[ "${OS}" == "Darwin" ]]; then
 </plist>
 EOF
 
-  cat > "${LAUNCHER_APP}/Contents/MacOS/PlayCroMagRally" <<EOF
-#!/usr/bin/env bash
-exec /usr/bin/python3 "${UPDATER_DST}" launch --gui "\$@"
+  if command -v cc >/dev/null 2>&1; then
+    TMP_C="$(mktemp /tmp/cromag-launcher.XXXXXX.c)"
+    cat > "${TMP_C}" <<EOF
+#include <unistd.h>
+int main(void) {
+    char *const argv[] = {
+        "/usr/bin/python3",
+        "${UPDATER_DST}",
+        "launch",
+        "--gui",
+        "--install-path",
+        "${APP_INSTALL_PATH}",
+        NULL
+    };
+    execv("/usr/bin/python3", argv);
+    return 1;
+}
 EOF
-  chmod 0755 "${LAUNCHER_APP}/Contents/MacOS/PlayCroMagRally"
+    cc -O2 "${TMP_C}" -o "${LAUNCHER_APP}/Contents/MacOS/CroMagRallyLauncher"
+    rm -f "${TMP_C}"
+  else
+    cat > "${LAUNCHER_APP}/Contents/MacOS/CroMagRallyLauncher" <<EOF
+#!/usr/bin/env bash
+exec /usr/bin/python3 "${UPDATER_DST}" launch --gui --install-path "${APP_INSTALL_PATH}" "\$@"
+EOF
+  fi
+  chmod 0755 "${LAUNCHER_APP}/Contents/MacOS/CroMagRallyLauncher"
+  codesign --force --deep --sign - "${LAUNCHER_APP}" >/dev/null 2>&1 || true
 
   cat > "${PLIST_PATH}" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -65,6 +98,8 @@ EOF
     <string>/usr/bin/python3</string>
     <string>${UPDATER_DST}</string>
     <string>update</string>
+    <string>--install-path</string>
+    <string>${APP_INSTALL_PATH}</string>
   </array>
   <key>RunAtLoad</key>
   <true/>
@@ -82,9 +117,10 @@ EOF
   launchctl bootout "gui/${UID_NUM}/io.jor.cromagrally.updater" >/dev/null 2>&1 || true
   launchctl bootstrap "gui/${UID_NUM}" "${PLIST_PATH}"
 
-  /usr/bin/python3 "${UPDATER_DST}" update
+  /usr/bin/python3 "${UPDATER_DST}" update --install-path "${APP_INSTALL_PATH}"
   echo "macOS auto-updater installed."
   echo "  Background agent: ${PLIST_PATH}"
+  echo "  Managed app:      ${APP_INSTALL_PATH}"
   echo "  Launcher app:     ${LAUNCHER_APP}"
 
 elif [[ "${OS}" == "Linux" ]]; then
