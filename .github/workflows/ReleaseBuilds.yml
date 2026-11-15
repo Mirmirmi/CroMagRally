@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - master
+      - main
     tags:
       - 'v*'
 
@@ -16,7 +16,7 @@ jobs:
   bump-version:
     if: >-
       github.event_name == 'push' &&
-      github.ref == 'refs/heads/master' &&
+      github.ref == 'refs/heads/main' &&
       !startsWith(github.event.head_commit.message, 'Bump version to ')
     runs-on: ubuntu-22.04
     timeout-minutes: 5
@@ -40,8 +40,8 @@ jobs:
           COMMIT_MSG: ${{ github.event.head_commit.message }}
         run: |
           set -euo pipefail
-          git fetch origin master --tags
-          git checkout -B master origin/master
+          git fetch origin main --tags
+          git checkout -B main origin/main
 
           CUR_VER="$(python3 .github/scripts/bump_version.py --print-current)"
           TARGET_SHA="$(git rev-parse HEAD)"
@@ -75,7 +75,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add CMakeLists.txt Source/Headers/version.h
           git commit -m "Bump version to ${NEW_VER} [skip ci]"
-          git push origin HEAD:master
+          git push origin HEAD:main
 
           NEW_SHA="$(git rev-parse HEAD)"
           echo "Bumped version ${CUR_VER} -> ${NEW_VER} (${NEW_SHA})"
@@ -118,7 +118,10 @@ jobs:
           submodules: recursive
       - uses: ./.github/actions/setup-linux-sdl
       - run: echo "ARTIFACT_NAME=$(python3 build.py --print-artifact-name)" >> "$GITHUB_ENV"
-      - run: python3 build.py --configure --build --package
+      - run: python3 build.py --configure --build
+      - name: Run tests
+        run: ctest --test-dir build -C RelWithDebInfo --output-on-failure
+      - run: python3 build.py --package
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ARTIFACT_NAME }}
@@ -166,7 +169,12 @@ jobs:
           ref: ${{ needs.bump-version.outputs.target_ref || github.sha }}
           submodules: recursive
       - run: echo "ARTIFACT_NAME=$(python3 build.py --print-artifact-name)" >> "$GITHUB_ENV"
-      - run: python3 build.py --dependencies --configure --build --package
+      - run: python3 build.py --dependencies --configure --build
+      - name: Run tests
+        env:
+          DYLD_FRAMEWORK_PATH: ${{ github.workspace }}/extern
+        run: ctest --test-dir build -C RelWithDebInfo --output-on-failure
+      - run: python3 build.py --package
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ARTIFACT_NAME }}
@@ -193,6 +201,58 @@ jobs:
         with:
           path: release-artifacts
           merge-multiple: true
+      - name: Generate release manifest and checksums
+        env:
+          TAG: ${{ needs.bump-version.outputs.release_tag || github.ref_name }}
+          TARGET_SHA: ${{ needs.bump-version.outputs.target_ref || github.sha }}
+        run: |
+          python3 - <<'PY'
+          import datetime, glob, hashlib, json, os
+
+          tag = os.environ["TAG"]
+          version = tag.removeprefix("v")
+          artifacts = sorted(
+              p for p in glob.glob("release-artifacts/*")
+              if os.path.isfile(p) and os.path.basename(p) not in ("SHA256SUMS.txt", "latest.json")
+          )
+
+          sums = []
+          assets = {}
+          for path in artifacts:
+              name = os.path.basename(path)
+              h = hashlib.sha256()
+              with open(path, "rb") as f:
+                  for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                      h.update(chunk)
+              digest = h.hexdigest()
+              sums.append(f"{digest}  {name}")
+              if name.endswith("-mac.dmg"):
+                  key = "mac"
+              elif name.endswith("-linux-aarch64.AppImage"):
+                  key = "linux_aarch64"
+              elif name.endswith("-linux-x86_64.AppImage"):
+                  key = "linux_x86_64"
+              elif name.endswith("-windows-x64.zip"):
+                  key = "windows_x64"
+              else:
+                  key = name
+              assets[key] = {"name": name, "sha256": digest, "size": os.path.getsize(path)}
+
+          with open("release-artifacts/SHA256SUMS.txt", "w", encoding="utf-8") as f:
+              f.write("\n".join(sums) + "\n")
+
+          manifest = {
+              "version": version,
+              "tag": tag,
+              "commit": os.environ["TARGET_SHA"],
+              "published_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "assets": assets,
+          }
+          with open("release-artifacts/latest.json", "w", encoding="utf-8") as f:
+              json.dump(manifest, f, indent=2)
+              f.write("\n")
+          PY
+
       - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
