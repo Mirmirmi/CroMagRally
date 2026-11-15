@@ -1126,7 +1126,7 @@ NewParticleDefType		newParticleDef;
 
 	pt.x = x;
 	pt.z = z;
-	PlayEffect_Parms3D(EFFECT_SPLASH, &pt, NORMAL_CHANNEL_RATE, 3);
+	PlayEffect_Parms3DSynced(EFFECT_SPLASH, &pt, NORMAL_CHANNEL_RATE, 3);
 }
 
 
@@ -1284,6 +1284,9 @@ NewParticleDefType		newParticleDef;
 	MakeSnowShockwave(where->x, where->y, where->z);
 
 	PlayEffect_Parms3D(EFFECT_BOOM, where, NORMAL_CHANNEL_RATE, 4);
+
+	if (gIsNetworkHost)
+		Net_HostSendExplosion(where->x, where->y, where->z, kNetExplosion_Snow);
 
 
 }
@@ -1656,7 +1659,7 @@ OGLPoint3D				where;
 		/*******************/
 
 	MakeConeBlast(where.x, where.y, where.z);
-	PlayEffect_Parms3D(EFFECT_BOOM, &where, NORMAL_CHANNEL_RATE * 3/2, 3);
+	PlayEffect_Parms3DSynced(EFFECT_BOOM, &where, NORMAL_CHANNEL_RATE * 3/2, 3);
 
 
 		/* SEE IF IT HIT ANY CARS */

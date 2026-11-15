@@ -10,6 +10,7 @@
 /****************************/
 
 #include "game.h"
+#include "network.h"
 
 /****************************/
 /*    PROTOTYPES            */
@@ -674,9 +675,9 @@ Boolean		onWater;
 	{
 		if (pinfo->distToFloor > 500.0f)							// must be high for it to register
 		{
-			if (pinfo->onThisMachine && (!pinfo->isComputer) && (!onWater))		// only humans on this computer make sound
+			if (!onWater)
 			{
-				PlayAnnouncerSound(EFFECT_WOAH, false, 0);
+				PlayPlayerAnnouncerSound(playerNum, EFFECT_WOAH, false, 0);
 			}
 		}
 	}
@@ -1398,7 +1399,7 @@ void UpdateCarVisualsFromSnapshot(ObjNode *theNode)
 			gPlayerInfo[p].currentRPM = 0.0f;
 	}
 
-	if (gPlayerInfo[p].isEliminated)
+	if (gPlayerInfo[p].isEliminated || gTrackNum == TRACK_NUM_ATLANTIS)
 	{
 		if (gPlayerInfo[p].engineChannel != -1)
 			StopAChannel(&gPlayerInfo[p].engineChannel);
@@ -1906,7 +1907,7 @@ Boolean		wasInWater;
 
 				if (gPlayerInfo[playerNum].bumpSoundTimer <= 0.0f)
 				{
-					PlayEffect_Parms3D(EFFECT_CRASH2, &gCoord, NORMAL_CHANNEL_RATE, volume);
+					PlayEffect_Parms3DSynced(EFFECT_CRASH2, &gCoord, NORMAL_CHANNEL_RATE, volume);
 					gPlayerInfo[playerNum].bumpSoundTimer = .5f;
 				}
 			}
@@ -2183,29 +2184,19 @@ short		p2 = car2->PlayerNum;
 			{
 				if ((gGameMode != GAME_MODE_TAG1) && (gGameMode != GAME_MODE_TAG2))		// Dont announce in Tag modes
 				{
-					if (gPlayerInfo[p1].onThisMachine || gPlayerInfo[p2].onThisMachine)			// one of them must be on this machine
+					if ((!gPlayerInfo[p1].isComputer) || (!gPlayerInfo[p2].isComputer))		// and one of them must be human
 					{
-						if ((!gPlayerInfo[p1].isComputer) || (!gPlayerInfo[p2].isComputer))		// and one of them must be human
+						short quip = EFFECT_GOTTAHURT;
+						float delay = .4f;
+						switch(TickCount() & 0x3)										// use tick count as a random # generator since we cannot get a real Random # b/c that would hoze the seed
 						{
-							switch(TickCount() & 0x3)										// use tick count as a random # generator since we cannot get a real Random # b/c that would hoze the seed
-							{
-								case	0:
-										PlayAnnouncerSound(EFFECT_GOTTAHURT, false, .3);
-										break;
-
-								case	1:
-										PlayAnnouncerSound(EFFECT_NICEDRIVING, false, .4);
-										break;
-
-								case	2:
-										PlayAnnouncerSound(EFFECT_COSTYA, false, .4);
-										break;
-
-								case	3:
-										PlayAnnouncerSound(EFFECT_WATCHIT, false, .4);
-										break;
-							}
+							case 0: quip = EFFECT_GOTTAHURT;   delay = .3f; break;
+							case 1: quip = EFFECT_NICEDRIVING; break;
+							case 2: quip = EFFECT_COSTYA;      break;
+							case 3: quip = EFFECT_WATCHIT;     break;
 						}
+						PlayPlayerAnnouncerSound(p1, quip, false, delay);
+						PlayPlayerAnnouncerSound(p2, quip, false, delay);
 					}
 				}
 			}
@@ -2217,7 +2208,7 @@ short		p2 = car2->PlayerNum;
 
 	if (relSpeed > 500.0f && canDoBumpFeedback)
 	{
-		PlayEffect3D(EFFECT_CRASH2, &gCoord);
+		PlayEffect_Parms3DSynced(EFFECT_CRASH2, &gCoord, NORMAL_CHANNEL_RATE, 1.0f);
 		didBumpFeedback = true;
 	}
 
@@ -3480,13 +3471,10 @@ ObjNode	*obj;
 				{
 					if (d <= (radius * .7f))
 					{
-						if ((gPlayerInfo[whoThrew].onThisMachine) && (!gPlayerInfo[whoThrew].isComputer))
-						{
-							if (TickCount() & 1)										// use tick count as a random # generator since we cannot get a real Random # b/c that would hoze the seed
-								PlayAnnouncerSound(EFFECT_NICESHOT, false, .9);
-							else
-								PlayAnnouncerSound(EFFECT_OHYEAH, false, .9);
-						}
+						if (TickCount() & 1)										// use tick count as a random # generator since we cannot get a real Random # b/c that would hoze the seed
+							PlayPlayerAnnouncerSound(whoThrew, EFFECT_NICESHOT, false, .9);
+						else
+							PlayPlayerAnnouncerSound(whoThrew, EFFECT_OHYEAH, false, .9);
 					}
 				}
 			}

@@ -11,6 +11,7 @@
 /***************/
 
 #include "game.h"
+#include "network.h"
 
 
 /****************************/
@@ -1273,4 +1274,23 @@ void FadeSound(float loudness)
 {
 	gGlobalVolumeFade = loudness;
 	UpdateGlobalVolume();
+}
+
+short PlayEffect_Parms3DSynced(short effectNum, const OGLPoint3D *where, uint32_t rateMultiplier, float volumeAdjust)
+{
+	short ch = PlayEffect_Parms3D(effectNum, where, rateMultiplier, volumeAdjust);
+	if (gIsNetworkHost && where)
+		Net_HostSendSound3D(effectNum, where->x, where->y, where->z, rateMultiplier, volumeAdjust);
+	return ch;
+}
+
+void PlayPlayerAnnouncerSound(short playerNum, short effectNum, Boolean override, float delay)
+{
+	if (playerNum < 0 || playerNum >= MAX_PLAYERS || gPlayerInfo[playerNum].isComputer)
+		return;
+
+	if (gPlayerInfo[playerNum].onThisMachine)
+		PlayAnnouncerSound(effectNum, override, delay);
+	else if (gIsNetworkHost)
+		Net_HostSendAnnouncerSound(playerNum, effectNum, override, delay);
 }

@@ -11,6 +11,7 @@
 /***************/
 
 #include "game.h"
+#include "network.h"
 
 extern SDL_Window* gSDLWindow;
 
@@ -195,6 +196,8 @@ void OGL_FadeOutScene(void (*drawCall)(void), void (*moveCall)(void))
 	{
 		CalcFramesPerSecond();
 		DoSDLMaintenance();
+		if (gNetGameInProgress)
+			Net_PollLobby();
 
 		if (moveCall)
 		{

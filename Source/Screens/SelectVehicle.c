@@ -207,6 +207,81 @@ static Boolean DoMultiplayerRaceOptionsScreen(void)
 	return pick != 1;
 }
 
+static Boolean WaitForNetVehicleSelectionsScreen(void)
+{
+	Net_PollLobby();
+	int state = Net_CheckVehicleSelectionsReady();
+	if (state != 0)
+		return state < 0;
+
+	OGLSetupInputType viewDef;
+	OGL_NewViewDef(&viewDef);
+	viewDef.camera.from[0].z = 700;
+	viewDef.camera.from[0].y = 250;
+	viewDef.view.clearColor = (OGLColorRGBA){0.08f, 0.06f, 0.04f, 1.0f};
+	viewDef.styles.useFog = false;
+	viewDef.view.pillarboxRatio = PILLARBOX_RATIO_4_3;
+	viewDef.view.fontName = "rockfont";
+	OGL_SetupGameView(&viewDef);
+
+	MakeScrollingBackgroundPattern();
+
+	NewObjectDefinitionType def =
+	{
+		.coord = {0, -10, 0},
+		.scale = .42f,
+		.slot  = SPRITE_SLOT,
+	};
+	ObjNode* waitLabel = TextMesh_New("WAITING ON OTHER PLAYERS...", kTextMeshAlignCenter, &def);
+	if (waitLabel)
+		waitLabel->ColorFilter = (OGLColorRGBA){1.0f, 0.88f, 0.55f, 1.0f};
+
+	def.coord.y = 220;
+	def.scale = .27f;
+	ObjNode* escPrompt = TextMesh_New(Localize(STR_PRESS_ESC_TO_GO_BACK), kTextMeshAlignCenter, &def);
+	if (escPrompt)
+	{
+		escPrompt->ColorFilter = (OGLColorRGBA){0.75f, 0.75f, 0.75f, 1.0f};
+		MakeTwitch(escPrompt, kTwitchPreset_PressKeyPrompt);
+	}
+
+	MakeFadeEvent(true);
+	CalcFramesPerSecond();
+	ReadKeyboard();
+
+	Boolean aborted = false;
+	while (true)
+	{
+		CalcFramesPerSecond();
+		ReadKeyboard();
+		Net_PollLobby();
+
+		state = Net_CheckVehicleSelectionsReady();
+		if (state != 0)
+		{
+			aborted = (state < 0);
+			break;
+		}
+
+		if (GetNewNeedStateAnyP(kNeed_UIBack))
+		{
+			PlayEffect(EFFECT_GETPOW);
+			aborted = true;
+			break;
+		}
+
+		MoveObjects();
+		OGL_DrawScene(DrawObjects);
+	}
+
+	if (!aborted)
+		OGL_FadeOutScene(DrawObjects, MoveObjects);
+
+	DeleteAllObjects();
+	OGL_DisposeGameView();
+	return aborted;
+}
+
 Boolean DoMultiPlayerVehicleSelections(void)
 {
 	if (gNetGameInProgress)
@@ -253,7 +328,7 @@ Boolean DoMultiPlayerVehicleSelections(void)
 		}
 
 		PlayerBroadcastVehicleType();								// tell other net players about all local seats
-		if (GetVehicleSelectionFromNetPlayers())					// get types from other net players
+		if (WaitForNetVehicleSelectionsScreen())					// get types from other net players
 		{
 			Net_DisconnectGracefully();
 			return true;

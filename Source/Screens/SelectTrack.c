@@ -11,6 +11,7 @@
 /****************************/
 
 #include "game.h"
+#include "network.h"
 
 
 /****************************/
@@ -134,6 +135,8 @@ Boolean SelectSingleTrack(void)
 
 		CalcFramesPerSecond();
 		ReadKeyboard();
+		if (gNetGameInProgress)
+			Net_PollLobby();
 		MoveObjects();
 		OGL_DrawScene(DrawObjects);
 	}

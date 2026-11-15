@@ -37,6 +37,20 @@ static float                sLastPowTimer = 0.0f;
 static int                  sShowWinLoseCalls = 0;
 static short                sLastWinner = -1;
 static int                  sShowFinalPlaceCalls = 0;
+static int                  sSound3DCalls = 0;
+static short                sLastSound3DEffect = -1;
+static uint32_t             sLastSound3DRate = 0;
+static float                sLastSound3DVolume = 0.0f;
+static int                  sAnnouncerCalls = 0;
+static short                sLastAnnouncerEffect = -1;
+static Boolean              sLastAnnouncerOverride = false;
+static float                sLastAnnouncerDelay = 0.0f;
+static int                  sSnowExplosionCalls = 0;
+static int                  sWeaponExplosionCalls = 0;
+static short                sLastWeaponExplosionKind = -1;
+static int                  sTrailCalls = 0;
+static ObjNode              sTestObjPool[64];
+static int                  sTestObjPoolNext = 0;
 static unsigned long        sSeed = 0x12345678UL;
 
 void DeleteObject(ObjNode *theNode)
@@ -68,16 +82,42 @@ void MakeBombExplosion(ObjNode *theBomb, float x, float z, const OGLVector3D *de
 	(void)delta;
 }
 
+void MakeSnowExplosion(const OGLPoint3D *where)
+{
+	(void)where;
+	sSnowExplosionCalls++;
+}
+
+void PlayWeaponExplosionFX(short explosionKind, const OGLPoint3D *where)
+{
+	(void)where;
+	sWeaponExplosionCalls++;
+	sLastWeaponExplosionKind = explosionKind;
+}
+
+void UpdateClientProjectileTrail(ObjNode *theNode)
+{
+	(void)theNode;
+	sTrailCalls++;
+}
+
 ObjNode *MakeNewDisplayGroupObject(NewObjectDefinitionType *newObjDef)
 {
-	(void)newObjDef;
-	return NULL;
+	if (!newObjDef)
+		return NULL;
+	ObjNode *obj = &sTestObjPool[sTestObjPoolNext++ % 64];
+	memset(obj, 0, sizeof(*obj));
+	obj->Group = newObjDef->group;
+	obj->Type = newObjDef->type;
+	obj->Coord = newObjDef->coord;
+	obj->StatusBits = newObjDef->flags;
+	obj->Scale.x = obj->Scale.y = obj->Scale.z = (newObjDef->scale > 0.0f) ? newObjDef->scale : 1.0f;
+	return obj;
 }
 
 ObjNode *MakeNewSkeletonObject(NewObjectDefinitionType *newObjDef)
 {
-	(void)newObjDef;
-	return NULL;
+	return MakeNewDisplayGroupObject(newObjDef);
 }
 
 unsigned long MyRandomLong(void)
@@ -115,11 +155,20 @@ short PlayEffect_Parms(short effectNum, uint32_t leftVolume, uint32_t rightVolum
 
 short PlayEffect_Parms3D(short effectNum, const OGLPoint3D *where, uint32_t rateMultiplier, float volumeAdjust)
 {
-	(void)effectNum;
 	(void)where;
-	(void)rateMultiplier;
-	(void)volumeAdjust;
+	sSound3DCalls++;
+	sLastSound3DEffect = effectNum;
+	sLastSound3DRate = rateMultiplier;
+	sLastSound3DVolume = volumeAdjust;
 	return 0;
+}
+
+void PlayAnnouncerSound(short effectNum, Boolean override, float delay)
+{
+	sAnnouncerCalls++;
+	sLastAnnouncerEffect = effectNum;
+	sLastAnnouncerOverride = override;
+	sLastAnnouncerDelay = delay;
 }
 
 void ShowFinalPlace(short playerNum, int rankInScoreboard)
@@ -1143,6 +1192,197 @@ static int TestPersistentLobbyAndMultiFinishLoopback(void)
 	return 0;
 }
 
+static int TestRefinementsLoopback(void)
+{
+	uint16_t basePort = (uint16_t)(42500 + (getpid() % 400) * 4);
+	const uint16_t testPort = basePort;
+	const uint16_t discPort = (uint16_t)(basePort + 1);
+
+	pid_t hostPid = fork();
+	TEST_ASSERT(hostPid >= 0, "fork failed for refinement host");
+	if (hostPid == 0)
+	{
+		memset(gPlayerInfo, 0, sizeof(gPlayerInfo));
+		memset(&gGamePrefs, 0, sizeof(gGamePrefs));
+		gGameOver = false;
+		gTrackCompleted = false;
+		gGameMode = GAME_MODE_MULTIPLAYERRACE;
+		gTheAge = 0;
+		gTrackNum = TRACK_NUM_DESERT;
+		gMultiplayerCPUs = 0;
+		gNumLocalPlayers = 1;
+		gLocalPlayerNums[0] = 0;
+		gPlayerInfo[0].onThisMachine = true;
+
+		Net_SetPorts(testPort, discPort);
+		InitNetworkManager();
+		if (!Net_StartHostLobby("RefHost"))
+			_exit(3);
+
+		uint32_t start = SDL_GetTicks();
+		while (Net_GetConnectedPlayerCount() < 2 && (SDL_GetTicks() - start) < 5000)
+		{
+			Net_PollLobby();
+			SDL_Delay(10);
+		}
+		if (Net_GetConnectedPlayerCount() < 2)
+			_exit(4);
+
+		if (!Net_HostLaunchMatch())
+			_exit(5);
+
+		/* Client picks vehicle first, host delays slightly to test wait status on client */
+		start = SDL_GetTicks();
+		while ((SDL_GetTicks() - start) < 300)
+		{
+			Net_PollLobby();
+			SDL_Delay(10);
+		}
+		gPlayerInfo[0].vehicleType = 0;
+		PlayerBroadcastVehicleType();
+		if (GetVehicleSelectionFromNetPlayers())
+			_exit(6);
+
+		gNumTotalPlayers = 2;
+		HostWaitForPlayersToPrepareLevel();
+
+		ObjNode cars[2];
+		memset(cars, 0, sizeof(cars));
+		gNumTotalPlayers = 2;
+		gPlayerInfo[0].objNode = &cars[0];
+		gPlayerInfo[1].objNode = &cars[1];
+		gPlayerInfo[1].isComputer = false;
+
+		ObjNode proj;
+		memset(&proj, 0, sizeof(proj));
+		proj.Group = 3;
+		proj.Type = 5;
+		proj.Scale.x = proj.Scale.y = proj.Scale.z = 2.0f;
+		proj.StatusBits = STATUS_BIT_AIMATCAMERA | STATUS_BIT_KEEPBACKFACES | STATUS_BIT_GLOW |
+		                  STATUS_BIT_NOLIGHTING | STATUS_BIT_NOTEXTUREWRAP;
+		proj.Coord.x = 123.0f;
+		proj.Coord.y = 45.0f;
+		proj.Coord.z = 678.0f;
+		Net_RegisterWeaponObj(&proj, 0);
+
+		HostSend_ControlInfoToClients();
+
+		/* Sound3D with effectId >= 128 + custom rate, AnnouncerSound, Snow & RomanCandle explosions */
+		Net_HostSendSound3D(140, 10.0f, 20.0f, 30.0f, NORMAL_CHANNEL_RATE + 0x2000u, 3.5f);
+		Net_HostSendAnnouncerSound(1, 77, true, 0.25f);
+		Net_HostSendAnnouncerSound(0, 88, true, 0.25f); /* Host only: client must ignore */
+		Net_HostSendExplosion(10.0f, 20.0f, 30.0f, kNetExplosion_Snow);
+		Net_HostSendExplosion(11.0f, 22.0f, 33.0f, kNetExplosion_RomanCandle);
+
+		/* Pump until client closes or 3s elapse */
+		start = SDL_GetTicks();
+		while (Net_HasRemoteClients() && (SDL_GetTicks() - start) < 3000)
+		{
+			HostReceive_ControlInfoFromClients();
+			HostSend_ControlInfoToClients();
+			SDL_Delay(10);
+		}
+
+		ShutdownNetworkManager();
+		_exit(0);
+	}
+
+	memset(gPlayerInfo, 0, sizeof(gPlayerInfo));
+	memset(&gGamePrefs, 0, sizeof(gGamePrefs));
+	Net_ResetGameSyncState();
+	gGameOver = false;
+	gTrackCompleted = false;
+	gGameMode = GAME_MODE_PRACTICE;
+	gNumLocalPlayers = 1;
+	gLocalPlayerNums[0] = 0;
+
+	Net_SetPorts(testPort, discPort);
+	InitNetworkManager();
+	TEST_ASSERT(Net_ConnectToHost("127.0.0.1", testPort, "RefClient"), "Client connect failed");
+
+	uint32_t start = SDL_GetTicks();
+	while (Net_GetConnectionState(NULL) == kNetConn_Connecting && (SDL_GetTicks() - start) < 5000)
+	{
+		Net_PollLobby();
+		SDL_Delay(10);
+	}
+	TEST_ASSERT(Net_GetConnectionState(NULL) == kNetConn_Connected, "Client failed to connect");
+
+	start = SDL_GetTicks();
+	while (!Net_ClientHasMatchStarted() && (SDL_GetTicks() - start) < 5000)
+	{
+		Net_PollLobby();
+		SDL_Delay(10);
+	}
+	TEST_ASSERT(Net_ClientHasMatchStarted(), "Client never saw MatchStarted");
+
+	gPlayerInfo[1].onThisMachine = true;
+	gPlayerInfo[1].isComputer = false;
+	gPlayerInfo[1].vehicleType = 1;
+	PlayerBroadcastVehicleType();
+	/* Should initially wait on host's selection, then become ready */
+	int firstCheck = Net_CheckVehicleSelectionsReady();
+	TEST_ASSERT(firstCheck == 0, "Expected client to wait on host vehicle selection");
+	start = SDL_GetTicks();
+	while (Net_CheckVehicleSelectionsReady() == 0 && (SDL_GetTicks() - start) < 5000)
+		SDL_Delay(10);
+	TEST_ASSERT(Net_CheckVehicleSelectionsReady() == 1, "Vehicle selections did not finish");
+
+	sSound3DCalls = 0;
+	sLastSound3DEffect = -1;
+	sLastSound3DRate = 0;
+	sLastSound3DVolume = 0.0f;
+	sAnnouncerCalls = 0;
+	sLastAnnouncerEffect = -1;
+	sSnowExplosionCalls = 0;
+	sWeaponExplosionCalls = 0;
+	sLastWeaponExplosionKind = -1;
+	sTrailCalls = 0;
+	sTestObjPoolNext = 0;
+
+	ClientTellHostLevelIsPrepared();
+
+	ObjNode cars[2];
+	memset(cars, 0, sizeof(cars));
+	gPlayerInfo[0].objNode = &cars[0];
+	gPlayerInfo[1].objNode = &cars[1];
+	gPlayerInfo[1].onThisMachine = true;
+	gPlayerInfo[1].isComputer = false;
+
+	start = SDL_GetTicks();
+	while ((sWeaponExplosionCalls == 0 || sAnnouncerCalls == 0 || sSound3DCalls == 0 || sTestObjPoolNext == 0 || sTrailCalls == 0) &&
+	       (SDL_GetTicks() - start) < 4000)
+	{
+		ClientReceive_ControlInfoFromHost();
+		Net_ClientUpdateVisualFrame();
+		SDL_Delay(10);
+	}
+
+	TEST_ASSERT(sSound3DCalls >= 1 && sLastSound3DEffect == 140 &&
+	            sLastSound3DRate == (NORMAL_CHANNEL_RATE + 0x2000u) &&
+	            fabsf(sLastSound3DVolume - 3.5f) < 0.01f,
+	            "Sound3D high effectId / rateMultiplier / volume mismatch on client");
+	TEST_ASSERT(sAnnouncerCalls == 1 && sLastAnnouncerEffect == 77 && sLastAnnouncerOverride == true &&
+	            fabsf(sLastAnnouncerDelay - 0.25f) < 0.01f,
+	            "Targeted AnnouncerSound mismatch or leaked wrong-player call on client");
+	TEST_ASSERT(sSnowExplosionCalls >= 1, "Client did not trigger MakeSnowExplosion");
+	TEST_ASSERT(sWeaponExplosionCalls >= 1 && sLastWeaponExplosionKind == kNetExplosion_RomanCandle,
+	            "Client did not trigger PlayWeaponExplosionFX(RomanCandle)");
+	TEST_ASSERT(sTestObjPoolNext >= 1 &&
+	            (sTestObjPool[0].StatusBits & (STATUS_BIT_AIMATCAMERA | STATUS_BIT_GLOW)) ==
+	            (STATUS_BIT_AIMATCAMERA | STATUS_BIT_GLOW),
+	            "Client projectile did not preserve AIMATCAMERA|GLOW statusBits");
+	TEST_ASSERT(sTrailCalls >= 1, "Net_ClientUpdateVisualFrame did not update projectile trails");
+
+	Net_DisconnectGracefully();
+	SDL_Delay(50);
+	ShutdownNetworkManager();
+	int statusH = 0;
+	TEST_ASSERT(waitpid(hostPid, &statusH, 0) == hostPid, "waitpid failed for Refinement Host");
+	TEST_ASSERT(WIFEXITED(statusH) && WEXITSTATUS(statusH) == 0, "Refinement Host exited non-zero");
+	return 0;
+}
+
 int main(void)
 {
 	if (TestLANValidation() != 0)
@@ -1164,5 +1404,9 @@ int main(void)
 	if (TestPersistentLobbyAndMultiFinishLoopback() != 0)
 		return 1;
 	printf("PASS: TestPersistentLobbyAndMultiFinishLoopback\n");
+
+	if (TestRefinementsLoopback() != 0)
+		return 1;
+	printf("PASS: TestRefinementsLoopback\n");
 	return 0;
 }

@@ -14,7 +14,7 @@ extern "C" {
 
 #define NET_DEFAULT_PORT        29400
 #define NET_DISCOVERY_PORT      29401
-#define NET_PROTOCOL_VERSION    3
+#define NET_PROTOCOL_VERSION    4
 #define NET_MAGIC               0x434D524Eu /* 'CMRN' */
 #define NET_MAX_DISCOVERED_HOSTS 16
 #define NET_MAX_PROJECTILES     24
@@ -52,8 +52,19 @@ typedef enum NetReliableEventKind
 	kNetEvent_LapOrFinish,
 	kNetEvent_FlagEvent,
 	kNetEvent_GameOver,
-	kNetEvent_PlayerLeft
+	kNetEvent_PlayerLeft,
+	kNetEvent_AnnouncerSound
 } NetReliableEventKind;
+
+typedef enum NetExplosionKind
+{
+	kNetExplosion_Bomb = 0,
+	kNetExplosion_Snow,
+	kNetExplosion_RomanCandle,
+	kNetExplosion_BottleRocket,
+	kNetExplosion_Torpedo,
+	kNetExplosion_LandMine
+} NetExplosionKind;
 
 typedef enum NetLobbyConnectionState
 {
@@ -217,6 +228,7 @@ typedef struct NetTorchSnapshot
 typedef struct NetProjectileSnapshot
 {
 	uint32_t netId;
+	uint32_t statusBits;
 	uint8_t  group;
 	uint8_t  type;
 	uint8_t  kind;
@@ -330,6 +342,7 @@ Boolean ReenterClientLobby(void);
 
 /* Vehicle selection sync */
 void    PlayerBroadcastVehicleType(void);
+int     Net_CheckVehicleSelectionsReady(void);
 Boolean GetVehicleSelectionFromNetPlayers(void);
 
 /* Level load barrier */
@@ -345,7 +358,8 @@ void    HostReceive_ControlInfoFromClients(void);
 /* Host-only reliable event emitters */
 void    Net_HostSendPOWPickup(uint32_t itemIndex, short playerNum, short powType, float respawnTimer);
 void    Net_HostSendExplosion(float x, float y, float z, short typeHint);
-void    Net_HostSendSound3D(short effectId, float x, float y, float z, float volume);
+void    Net_HostSendSound3D(short effectId, float x, float y, float z, uint32_t rateMultiplier, float volume);
+void    Net_HostSendAnnouncerSound(short targetPlayer, short effectId, Boolean override, float delay);
 void    Net_HostSendLapOrFinish(short playerNum);
 void    Net_HostSendFlagEvent(short eventKind, short actorPlayer);
 void    Net_HostSendElimination(short eliminatedPlayer);

@@ -11,6 +11,7 @@
 
 #include "game.h"
 #include "miscscreens.h"
+#include "network.h"
 
 
 /****************************/
@@ -126,6 +127,8 @@ bool				doKeyText = timeout > 9;
 		while (timeout > 0)
 		{
 			CalcFramesPerSecond();
+			if (gNetGameInProgress)
+				Net_PollLobby();
 			MoveObjects();
 			OGL_DrawScene(DrawObjects);
 
