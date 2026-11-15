@@ -72,6 +72,11 @@ static const short kPawPatrolVehicles[] =
 #define NUM_PAW_PATROL_VEHICLES	((int)(sizeof(kPawPatrolVehicles) / sizeof(kPawPatrolVehicles[0])))
 #define NUM_VEHICLE_SLOTS		(CAR_TYPE_POLICE + 1)
 
+static int GetNumVehicleSlots(void)
+{
+	return IsPawPatrolEnabled() ? NUM_VEHICLE_SLOTS : CAR_TYPE_POLICE;
+}
+
 static short GetEffectiveSelectedVehicle(void)
 {
 	if (gSelectedVehicleIndex == CAR_TYPE_POLICE)
@@ -410,13 +415,14 @@ int					age;
 		gBoneMeters[i] = nil;
 
 	age = GetNumAgesCompleted();
+	int maxLandCars = IsPawPatrolEnabled() ? NUM_LAND_CAR_TYPES : CAR_TYPE_POLICE;
 	if (age >= 3)											// completing Iron Age unlocks Police Cruiser
-		gNumVehiclesToChooseFrom = NUM_LAND_CAR_TYPES;
+		gNumVehiclesToChooseFrom = maxLandCars;
 	else
 		gNumVehiclesToChooseFrom = 7 + (age * 2);			// set # cars we can pick from
 
 	if ((gNumRealPlayers > 1) || IsBattleGameMode(gGameMode) || gNetGameInProgress)	// let use any car in multiplayer/battle/net modes
-		gNumVehiclesToChooseFrom = NUM_LAND_CAR_TYPES;
+		gNumVehiclesToChooseFrom = maxLandCars;
 
 			/**************/
 			/* SETUP VIEW */
@@ -644,7 +650,7 @@ static void UpdateSelectedVehicle(void)
 			/* SHOW/HIDE ARROWS, PADLOCK */
 
 	SetObjectVisible(gVehicleLeftArrow,		gSelectedVehicleIndex > 0);
-	SetObjectVisible(gVehicleRightArrow,	gSelectedVehicleIndex < NUM_VEHICLE_SLOTS-1);
+	SetObjectVisible(gVehicleRightArrow,	gSelectedVehicleIndex < GetNumVehicleSlots() - 1);
 	SetObjectVisible(gVehiclePadlock,		gSelectedVehicleIndex >= gNumVehiclesToChooseFrom);
 }
 
@@ -739,7 +745,7 @@ short	p;
 		MakeTwitch(gVehicleName, kTwitchPreset_DisplaceRTL);
 	}
 	else
-	if (GetNewNeedState(kNeed_UIRight, p) && (gSelectedVehicleIndex < NUM_VEHICLE_SLOTS-1))
+	if (GetNewNeedState(kNeed_UIRight, p) && (gSelectedVehicleIndex < GetNumVehicleSlots() - 1))
 	{
 		PlayEffect(EFFECT_SELECTCLICK);
 		gSelectedVehicleIndex++;

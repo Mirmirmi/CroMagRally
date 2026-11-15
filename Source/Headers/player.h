@@ -357,3 +357,10 @@ void StretchSkidMark(ObjNode *owner, short subID, float x, float z, float dx, fl
 void DetachOwnerFromSkid(ObjNode *owner);
 void MakeSkidSmoke(short p, OGLPoint3D *coord);
 
+		/* PAW PATROL TOGGLES */
+
+Boolean IsPawPatrolEnabled(void);
+Boolean IsPawPatrolCPUEnabled(void);
+Boolean IsPawPatrolVehicleType(short carType);
+Boolean IsPawPatrolCharacterType(int sex);
+

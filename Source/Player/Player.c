@@ -41,6 +41,27 @@ PlayerInfoType	gPlayerInfo[MAX_PLAYERS];
 
 OGLColorRGB	gTagColor;
 
+Boolean IsPawPatrolEnabled(void)
+{
+	return gGamePrefs.pawPatrolEnabled != 0;
+}
+
+Boolean IsPawPatrolCPUEnabled(void)
+{
+	return gGamePrefs.pawPatrolEnabled && gGamePrefs.pawPatrolCPUEnabled;
+}
+
+Boolean IsPawPatrolVehicleType(short carType)
+{
+	return carType >= CAR_TYPE_POLICE && carType < NUM_LAND_CAR_TYPES;
+}
+
+Boolean IsPawPatrolCharacterType(int sex)
+{
+	return sex >= SKELETON_TYPE_PLAYER_CHASE && sex < NUM_PLAYER_CHARACTERS;
+}
+
+
 /******************** INIT PLAYER INFO ***************************/
 //
 // Called once at beginning of game (after network has been setup if needed).
@@ -143,6 +164,12 @@ short	i;
 		gPlayerInfo[i].isComputer 	    = false;        // these are real players, not computer players
     }
 
+	for (i = 0; i < MAX_PLAYERS; i++)
+	{
+		Boolean allowPaw = gPlayerInfo[i].isComputer ? IsPawPatrolCPUEnabled() : IsPawPatrolEnabled();
+		gPlayerInfo[i].sex = allowPaw ? (i % NUM_PLAYER_CHARACTERS) : (i % 2);
+	}
+
 
 			/* SEE HOW MANY PLAYERS IN GAME */
 
@@ -169,8 +196,11 @@ short	i;
 }
 
 
-static short PickMultiplayerCPUVehicle(Boolean taken[NUM_LAND_CAR_TYPES], uint32_t *rngState)
+static short PickMultiplayerCPUVehicle(Boolean taken[NUM_LAND_CAR_TYPES], uint32_t *rngState, int numAllowedVehicles)
 {
+	if (numAllowedVehicles <= 0)
+		numAllowedVehicles = CAR_TYPE_POLICE;
+
 	if (!gNetGameInProgress)
 	{
 		*rngState ^= *rngState << 13;
@@ -181,13 +211,13 @@ static short PickMultiplayerCPUVehicle(Boolean taken[NUM_LAND_CAR_TYPES], uint32
 	if (gGamePrefs.difficulty == DIFFICULTY_HARD)				// in hard mode, CPUs can duplicate cars
 	{
 		return gNetGameInProgress
-			? RandomRange(0, NUM_LAND_CAR_TYPES - 1)
-			: (short)(*rngState % NUM_LAND_CAR_TYPES);
+			? RandomRange(0, numAllowedVehicles - 1)
+			: (short)(*rngState % numAllowedVehicles);
 	}
 
 	short available[NUM_LAND_CAR_TYPES];
 	int count = 0;
-	for (int v = 0; v < NUM_LAND_CAR_TYPES; v++)
+	for (int v = 0; v < numAllowedVehicles; v++)
 	{
 		if (!taken[v])
 			available[count++] = (short)v;
@@ -214,6 +244,7 @@ void InitPlayersAtStartOfLevel(void)
 int		i,j,type;
 Boolean	taken[NUM_LAND_CAR_TYPES];
 uint32_t mpVehicleRng = (uint32_t)SDL_GetPerformanceCounter() | 1u;
+int		numAllowedCPUVehicles = IsPawPatrolCPUEnabled() ? NUM_LAND_CAR_TYPES : CAR_TYPE_POLICE;
 
 	gWorstHumanPlace = 0;
 
@@ -234,7 +265,7 @@ uint32_t mpVehicleRng = (uint32_t)SDL_GetPerformanceCounter() | 1u;
 
 	i = GetNumAgesCompleted();
 	if (i >= 3)														// completing Iron Age unlocks all land vehicles
-		type = NUM_LAND_CAR_TYPES - 1;
+		type = numAllowedCPUVehicles - 1;
 	else
 		type = 7 + (i * 2)-1;										// start @ end of usable cars so it will pick best cars
 
@@ -247,13 +278,13 @@ uint32_t mpVehicleRng = (uint32_t)SDL_GetPerformanceCounter() | 1u;
 		{
 			if (gGameMode >= GAME_MODE_MULTIPLAYERRACE)
 			{
-				gPlayerInfo[i].vehicleType = PickMultiplayerCPUVehicle(taken, &mpVehicleRng);
+				gPlayerInfo[i].vehicleType = PickMultiplayerCPUVehicle(taken, &mpVehicleRng, numAllowedCPUVehicles);
 			}
 			else if (gGamePrefs.difficulty == DIFFICULTY_HARD)			// in hard mode, the CPU can have duplicate cars
 				gPlayerInfo[i].vehicleType = RandomRange(0, type);
 			else														// in other difficulty modes, only choose unique cars
 			{
-				while(taken[type])										// skip over vehicles already used by Humans
+				while (type > 0 && taken[type])							// skip over vehicles already used by Humans
 					type--;
 
 				gPlayerInfo[i].vehicleType = type--;

@@ -29,11 +29,11 @@ static void FreeCharacterSelectArt(void);
 
 #define	ARROW_SCALE			.5
 #define CHAR_3D_SPREAD		84.0f
+#define CLASSIC_3D_SPREAD	60.0f
 #define ARROW_2D_SPREAD		193.0f
+#define CLASSIC_2D_SPREAD	138.0f
 #define ARROW_Y				204.0f
 #define NUM_CHARACTER_SLOTS	3
-
-#define GetCharacterArrowHomeX() (ARROW_2D_SPREAD * (gSelectedCharacterIndex - 1))
 
 
 /*********************/
@@ -97,6 +97,28 @@ static const struct
 	{ SKELETON_TYPE_CHASESTANDING,  STR_PAW_PATROL,  CHAR_3D_SPREAD,  177.0f, -194.0f, PI - 0.50f },
 };
 
+static int GetNumCharacterSlots(void)
+{
+	return IsPawPatrolEnabled() ? NUM_CHARACTER_SLOTS : 2;
+}
+
+static float GetCharacterSlotX3D(int i)
+{
+	if (IsPawPatrolEnabled())
+		return kCharacterSlots[i].x3d;
+	return (i == 0) ? -CLASSIC_3D_SPREAD : CLASSIC_3D_SPREAD;
+}
+
+static float GetCharacterSlotNameX2D(int i)
+{
+	if (IsPawPatrolEnabled())
+		return kCharacterSlots[i].nameX2d;
+	return (i == 0) ? -CLASSIC_2D_SPREAD : CLASSIC_2D_SPREAD;
+}
+
+#define GetCharacterArrowHomeX() \
+	(IsPawPatrolEnabled() ? (ARROW_2D_SPREAD * (gSelectedCharacterIndex - 1)) : GetCharacterSlotNameX2D(gSelectedCharacterIndex))
+
 
 /********************** DO CHARACTER SELECT SCREEN **************************/
 //
@@ -156,12 +178,12 @@ Boolean DoCharacterSelectScreen(short whichPlayer, Boolean allowAborting)
 	}
 	else if (gSelectedCharacterIndex == 0)
 	{
-		if (gBrogVariant == NUM_CAVEMAN_SKINS)
+		if (IsPawPatrolEnabled() && gBrogVariant == NUM_CAVEMAN_SKINS)
 		{
 			gPlayerInfo[whichPlayer].sex = SKELETON_TYPE_PLAYER_RYDER;
 			gPlayerInfo[whichPlayer].skin = 0;
 		}
-		else if (gBrogVariant == NUM_CAVEMAN_SKINS + 1)
+		else if (IsPawPatrolEnabled() && gBrogVariant == NUM_CAVEMAN_SKINS + 1)
 		{
 			gPlayerInfo[whichPlayer].sex = SKELETON_TYPE_PLAYER_HUMDINGER;
 			gPlayerInfo[whichPlayer].skin = 0;
@@ -184,19 +206,19 @@ static void UpdateCharacterHeaderPositions(void)
 {
 	if (gNameText[0])
 	{
-		if (gBrogVariant == NUM_CAVEMAN_SKINS)
+		if (IsPawPatrolEnabled() && gBrogVariant == NUM_CAVEMAN_SKINS)
 		{
 			gNameText[0]->Coord.x = -192.0f;
 			gNameText[0]->Coord.y = kCharacterSlots[0].nameY2d;
 		}
-		else if (gBrogVariant == NUM_CAVEMAN_SKINS + 1)
+		else if (IsPawPatrolEnabled() && gBrogVariant == NUM_CAVEMAN_SKINS + 1)
 		{
 			gNameText[0]->Coord.x = -193.0f;
 			gNameText[0]->Coord.y = kCharacterSlots[0].nameY2d;
 		}
 		else
 		{
-			gNameText[0]->Coord.x = kCharacterSlots[0].nameX2d;
+			gNameText[0]->Coord.x = GetCharacterSlotNameX2D(0);
 			gNameText[0]->Coord.y = kCharacterSlots[0].nameY2d;
 		}
 	}
@@ -220,21 +242,32 @@ OGLVector3D			fillDirection1 = { .9, -.3, -1 };
 ObjNode	*multiplayerText = NULL;
 
 	gSelectedCharacterIndex = 0;
-	if (gPlayerInfo[whichPlayer].sex >= SKELETON_TYPE_PLAYER_CHASE &&
+	if (!IsPawPatrolEnabled() && IsPawPatrolCharacterType(gPlayerInfo[whichPlayer].sex))
+		gPlayerInfo[whichPlayer].sex = SKELETON_TYPE_PLAYER_MALE;
+
+	if (IsPawPatrolEnabled() &&
+		gPlayerInfo[whichPlayer].sex >= SKELETON_TYPE_PLAYER_CHASE &&
 		gPlayerInfo[whichPlayer].sex <= SKELETON_TYPE_PLAYER_ROCKY)
 		gPawPatrolVariant = gPlayerInfo[whichPlayer].sex - SKELETON_TYPE_PLAYER_CHASE;
 	else
 		gPawPatrolVariant = 0;
 
-	if (gPlayerInfo[whichPlayer].sex == SKELETON_TYPE_PLAYER_RYDER)
+	if (IsPawPatrolEnabled() && gPlayerInfo[whichPlayer].sex == SKELETON_TYPE_PLAYER_RYDER)
 		gBrogVariant = NUM_CAVEMAN_SKINS;
-	else if (gPlayerInfo[whichPlayer].sex == SKELETON_TYPE_PLAYER_HUMDINGER)
+	else if (IsPawPatrolEnabled() && gPlayerInfo[whichPlayer].sex == SKELETON_TYPE_PLAYER_HUMDINGER)
 		gBrogVariant = NUM_CAVEMAN_SKINS + 1;
 	else
 		gBrogVariant = gPlayerInfo[whichPlayer].skin;
 
 	for (int i = 0; i < NUM_CHARACTER_SLOTS; i++)
+	{
+		gSex[i] = NULL;
 		gNameText[i] = NULL;
+	}
+	for (int i = 0; i < NUM_BROG_MODELS; i++)
+		gBrogModels[i] = NULL;
+	for (int i = 0; i < NUM_PAW_PATROL_VARIANTS; i++)
+		gPawPatrolModels[i] = NULL;
 
 			/**************/
 			/* SETUP VIEW */
@@ -277,12 +310,16 @@ ObjNode	*multiplayerText = NULL;
 
 			/* LOAD SKELETONS */
 
-	for (int i = 0; i < NUM_CHARACTER_SLOTS; i++)
+	int numSlots = GetNumCharacterSlots();
+	for (int i = 0; i < numSlots; i++)
 		LoadASkeleton(kCharacterSlots[i].skelType);
-	LoadASkeleton(SKELETON_TYPE_RYDERSTANDING);
-	LoadASkeleton(SKELETON_TYPE_HUMDINGERSTANDING);
-	for (int i = 1; i < NUM_PAW_PATROL_VARIANTS; i++)
-		LoadASkeleton(kPawPatrolStandingSkels[i]);
+	if (IsPawPatrolEnabled())
+	{
+		LoadASkeleton(SKELETON_TYPE_RYDERSTANDING);
+		LoadASkeleton(SKELETON_TYPE_HUMDINGERSTANDING);
+		for (int i = 1; i < NUM_PAW_PATROL_VARIANTS; i++)
+			LoadASkeleton(kPawPatrolStandingSkels[i]);
+	}
 
 
 
@@ -315,9 +352,9 @@ ObjNode	*multiplayerText = NULL;
 			.scale = .6f,
 			.slot = 99
 		};
-		for (int i = 0; i < NUM_CHARACTER_SLOTS; i++)
+		for (int i = 0; i < numSlots; i++)
 		{
-			newObjDef_NameString.coord.x = kCharacterSlots[i].nameX2d;
+			newObjDef_NameString.coord.x = GetCharacterSlotNameX2D(i);
 			newObjDef_NameString.coord.y = kCharacterSlots[i].nameY2d;
 			gNameText[i] = TextMesh_New(Localize(kCharacterSlots[i].nameStr), kTextMeshAlignCenter, &newObjDef_NameString);
 		}
@@ -327,13 +364,13 @@ ObjNode	*multiplayerText = NULL;
 
 			/* CREATE SELECTABLE CHARACTERS */
 
-	for (int i = 0; i < NUM_CHARACTER_SLOTS; i++)
+	for (int i = 0; i < numSlots; i++)
 	{
 		NewObjectDefinitionType newObjDef_Character =
 		{
 			.type = kCharacterSlots[i].skelType,
 			.animNum = (i == gSelectedCharacterIndex) ? 1 : 0,
-			.coord = {kCharacterSlots[i].x3d, 0, 0},
+			.coord = {GetCharacterSlotX3D(i), 0, 0},
 			.slot = 100,
 			.rot = kCharacterSlots[i].rotY,
 			.scale = .5f
@@ -341,17 +378,18 @@ ObjNode	*multiplayerText = NULL;
 		gSex[i] = MakeNewSkeletonObject(&newObjDef_Character);
 	}
 
+	gBrogModels[0] = gSex[0];
+	if (IsPawPatrolEnabled())
 	{
 		int brogModelIdx = (gBrogVariant == NUM_CAVEMAN_SKINS) ? 1 :
 						   (gBrogVariant == NUM_CAVEMAN_SKINS + 1) ? 2 : 0;
-		gBrogModels[0] = gSex[0];
 		for (int i = 1; i < NUM_BROG_MODELS; i++)
 		{
 			NewObjectDefinitionType newObjDef_BrogVar =
 			{
 				.type = kBrogStandingSkels[i],
 				.animNum = (gSelectedCharacterIndex == 0) ? 1 : 0,
-				.coord = {kCharacterSlots[0].x3d, 0, 0},
+				.coord = {GetCharacterSlotX3D(0), 0, 0},
 				.slot = 100,
 				.rot = kCharacterSlots[0].rotY,
 				.scale = .5f
@@ -363,6 +401,7 @@ ObjNode	*multiplayerText = NULL;
 		gSex[0] = gBrogModels[brogModelIdx];
 	}
 
+	if (IsPawPatrolEnabled())
 	{
 		gPawPatrolModels[0] = gSex[2];
 		for (int i = 1; i < NUM_PAW_PATROL_VARIANTS; i++)
@@ -371,7 +410,7 @@ ObjNode	*multiplayerText = NULL;
 			{
 				.type = kPawPatrolStandingSkels[i],
 				.animNum = (gSelectedCharacterIndex == 2) ? 1 : 0,
-				.coord = {kCharacterSlots[2].x3d, 0, 0},
+				.coord = {GetCharacterSlotX3D(2), 0, 0},
 				.slot = 100,
 				.rot = kCharacterSlots[2].rotY,
 				.scale = .5f
@@ -493,7 +532,8 @@ static void CycleSkin(short whichPlayer, int delta)
 
 static void UpdateSelectedCharacterAnim(void)
 {
-	for (int i = 0; i < NUM_CHARACTER_SLOTS; i++)
+	int numSlots = GetNumCharacterSlots();
+	for (int i = 0; i < numSlots; i++)
 		MorphToSkeletonAnim(gSex[i]->Skeleton, (i == gSelectedCharacterIndex) ? 1 : 0, 5.0);
 }
 
@@ -606,7 +646,7 @@ short	p;
 		MakeTwitch(gCharacterArrow, kTwitchPreset_DisplaceRTL);
 	}
 	else
-	if (GetNewNeedState(kNeed_UIRight, p) && (gSelectedCharacterIndex < NUM_CHARACTER_SLOTS - 1))
+	if (GetNewNeedState(kNeed_UIRight, p) && (gSelectedCharacterIndex < GetNumCharacterSlots() - 1))
 	{
 		PlayEffect(EFFECT_SELECTCLICK);
 		gSelectedCharacterIndex++;
@@ -624,7 +664,7 @@ short	p;
 
 		if (verticalDir != 0)
 		{
-			if (gSelectedCharacterIndex == 2)
+			if (IsPawPatrolEnabled() && gSelectedCharacterIndex == 2)
 			{
 				PlayEffect_Parms(EFFECT_SELECTCLICK, FULL_CHANNEL_VOLUME, FULL_CHANNEL_VOLUME, NORMAL_CHANNEL_RATE * 0.7f);
 				CyclePawPatrolVariant(verticalDir);
@@ -632,7 +672,10 @@ short	p;
 			else if (gGameMode != GAME_MODE_CAPTUREFLAG && gSelectedCharacterIndex == 0)
 			{
 				PlayEffect_Parms(EFFECT_SELECTCLICK, FULL_CHANNEL_VOLUME, FULL_CHANNEL_VOLUME, NORMAL_CHANNEL_RATE * 0.7f);
-				CycleBrogVariant(whichPlayer, verticalDir);
+				if (IsPawPatrolEnabled())
+					CycleBrogVariant(whichPlayer, verticalDir);
+				else
+					CycleSkin(whichPlayer, verticalDir);
 			}
 			else if (gGameMode != GAME_MODE_CAPTUREFLAG && gSelectedCharacterIndex == 1)
 			{

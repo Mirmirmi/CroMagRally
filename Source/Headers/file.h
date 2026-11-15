@@ -77,6 +77,8 @@ typedef struct
 
 	TournamentProgression tournamentProgression;
 	char	playerName[32];
+	Boolean	pawPatrolEnabled;
+	Boolean	pawPatrolCPUEnabled;
 }PrefsType;
 
 #define PREFS_FOLDER_NAME "CroMagRally"

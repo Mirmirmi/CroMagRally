@@ -2143,6 +2143,7 @@ static ObjNode* LayOutCycler1(int row)
 
 	ObjNode* node = MakeText(buf, row, 0, 0);
 	node->MoveCall = MoveAction;
+	GetMenuNodeData(node)->muted = !IsMenuItemSelectable(entry);
 
 	float baseScale = GetMenuItemHeight(row) * gNav->style.standardScale;
 	node->Scale = (OGLVector3D) { baseScale, baseScale, baseScale };

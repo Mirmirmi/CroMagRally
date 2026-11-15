@@ -13,6 +13,7 @@
 #include "game.h"
 #include "bones.h"
 #include "lzss.h"
+#include <stddef.h>
 
 /****************************/
 /*    PROTOTYPES            */
@@ -570,7 +571,14 @@ long				count;
 
 OSErr LoadPrefs(void)
 {
+	InitDefaultPrefs();
+
 	OSErr err = LoadUserDataFile(PREFS_FILENAME, PREFS_MAGIC, sizeof(PrefsType), (Ptr) &gGamePrefs);
+
+	if (err != noErr)
+	{
+		err = LoadUserDataFile(PREFS_FILENAME, PREFS_MAGIC, (long) offsetof(PrefsType, pawPatrolEnabled), (Ptr) &gGamePrefs);
+	}
 
 	if (err != noErr)
 	{
