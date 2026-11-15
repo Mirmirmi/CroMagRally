@@ -555,7 +555,9 @@ static void Infobar_MakeIcon(uint8_t type, uint8_t flags)
 static void Infobar_RepositionIconTemp(ObjNode* theNode)
 {
 	const InfobarIconData* special = GetInfobarIconData(theNode);
-	int pane = theNode->PlayerNum;
+	int pane = gPlayerInfo[theNode->PlayerNum].splitPaneNum;
+	if (pane < 0)
+		pane = 0;
 	int id = special->type;
 	int sub = special->sub;
 	theNode->Coord.x = GetIconX(pane, id) + sub * GetIconXSpacing(id);
@@ -1874,6 +1876,8 @@ void ShowWinLose(short playerNum, Byte mode, short winner)
 					for (int i = 0; i < 20; i++)									// copy name
 					{
 						char c = gPlayerNameStrings[winner][i];
+						if (c == '\0')
+							break;
 
 						if ((c >= 'a') && (c <= 'z'))								// convert to UPPER CASE
 							c = 'A' + (c - 'a');

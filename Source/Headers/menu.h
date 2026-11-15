@@ -16,6 +16,7 @@ typedef enum
 	kMIKeyBinding,
 	kMIPadBinding,
 	kMIMouseBinding,
+	kMITextInput,
 	kMI_COUNT
 } MenuItemType;
 
@@ -49,6 +50,13 @@ typedef struct
 	float			xSpread;
 } MenuFloatRangeData;
 
+typedef struct MenuTextInputData
+{
+	char*		buffer;
+	int			maxLength;
+	Boolean		ipOnly;
+} MenuTextInputData;
+
 typedef struct MenuItem
 {
 	MenuItemType			type;
@@ -58,12 +66,14 @@ typedef struct MenuItem
 
 	void					(*callback)(const struct MenuItem*);
 	int						(*getLayoutFlags)(const struct MenuItem*);
+	const char*				(*getDynamicText)(const struct MenuItem*);
 
 	union
 	{
 		int 				inputNeed;
 		MenuCyclerData		cycler;
 		MenuFloatRangeData	floatRange;
+		MenuTextInputData	textInput;
 	};
 
 	float					customHeight;

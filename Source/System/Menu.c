@@ -36,6 +36,7 @@ static ObjNode* LayOutKeyBinding(int row);
 static ObjNode* LayOutPadBinding(int row);
 static ObjNode* LayOutMouseBinding(int row);
 static ObjNode* LayOutFloatRange(int row);
+static ObjNode* LayOutTextInput(int row);
 
 static void NavigateCycler(const MenuItem* entry);
 static void NavigatePick(const MenuItem* entry);
@@ -43,6 +44,7 @@ static void NavigateKeyBinding(const MenuItem* entry);
 static void NavigatePadBinding(const MenuItem* entry);
 static void NavigateMouseBinding(const MenuItem* entry);
 static void NavigateFloatRange(const MenuItem* entry);
+static void NavigateTextInput(const MenuItem* entry);
 
 static float GetMenuItemHeight(int row);
 static int GetCyclerNumChoices(const MenuItem* entry);
@@ -88,6 +90,7 @@ enum
 	kMenuStateAwaitingKeyPress,
 	kMenuStateAwaitingPadPress,
 	kMenuStateAwaitingMouseClick,
+	kMenuStateEditingText,
 };
 
 const MenuStyle kDefaultMenuStyle =
@@ -131,6 +134,7 @@ static const MenuItemClass kMenuItemClasses[kMI_COUNT] =
 	[kMIKeyBinding]		= {0.5f, LayOutKeyBinding, NavigateKeyBinding },
 	[kMIPadBinding]		= {0.5f, LayOutPadBinding, NavigatePadBinding },
 	[kMIMouseBinding]	= {0.5f, LayOutMouseBinding, NavigateMouseBinding },
+	[kMITextInput]		= {1.0f, LayOutTextInput, NavigateTextInput },
 };
 
 /*********************/
@@ -499,6 +503,7 @@ static void TwitchSelectionInOrOut(bool scaleIn)
 		case kMIKeyBinding:
 		case kMIPadBinding:
 		case kMIMouseBinding:
+		case kMITextInput:
 			obj = GetNthChainedNode(obj, 1+gNav->menuCol, NULL);
 			break;
 
@@ -632,6 +637,10 @@ static void MoveControlBinding(ObjNode* node)
 
 		case kMIMouseBinding:
 			pulsatingState = kMenuStateAwaitingMouseClick;
+			break;
+
+		case kMITextInput:
+			pulsatingState = kMenuStateEditingText;
 			break;
 
 		default:
@@ -1338,6 +1347,119 @@ static void NavigateMouseBinding(const MenuItem* entry)
 #endif
 }
 
+static ObjNode* MakeTextInputValueObj(int row)
+{
+	DECLARE_WORKBUF(buf, bufSize);
+	const MenuItem* entry = &gNav->menu[row];
+	const char* val = (entry->textInput.buffer && entry->textInput.buffer[0]) ? entry->textInput.buffer : "---";
+	if (gNav->menuState == kMenuStateEditingText && gNav->menuRow == row)
+	{
+		SDL_snprintf(buf, bufSize, "%s-", (entry->textInput.buffer ? entry->textInput.buffer : ""));
+	}
+	else
+	{
+		SDL_snprintf(buf, bufSize, "%s", val);
+	}
+	ObjNode* valObj = MakeText(buf, row, 1, 0);
+	valObj->MoveCall = MoveControlBinding;
+	GetMenuNodeData(valObj)->col = 0;
+	return valObj;
+}
+
+static void NavigateTextInput(const MenuItem* entry)
+{
+	if (GetNewNeedStateAnyP(kNeed_UIConfirm)
+		|| GetNewKeyState(SDL_SCANCODE_KP_ENTER)
+		|| (gNav->mouseHoverValid && GetNewClickState(SDL_BUTTON_LEFT)))
+	{
+		PlayEffect(EFFECT_SELECTCLICK);
+		gNav->idleTime = 0;
+		gNav->menuCol = 0;
+		gNav->menuState = kMenuStateEditingText;
+		SetTextInputActive(true);
+		InvalidateAllInputs();
+		gTextInput[0] = '\0';
+		MakeTextInputValueObj(gNav->menuRow);
+		TwitchSelection();
+	}
+}
+
+static void AwaitTextInput(void)
+{
+	const MenuItem* entry = &gNav->menu[gNav->menuRow];
+	char* buf = entry->textInput.buffer;
+	int maxLen = entry->textInput.maxLength;
+	Boolean changed = false;
+
+	if (!buf || maxLen <= 1)
+	{
+		SetTextInputActive(false);
+		gNav->menuState = kMenuStateReady;
+		return;
+	}
+
+	if (GetNewKeyState(SDL_SCANCODE_ESCAPE))
+	{
+		PlayEffect(kSfxBack);
+		SetTextInputActive(false);
+		gNav->menuState = kMenuStateReady;
+		InvalidateAllInputs();
+		MakeTextInputValueObj(gNav->menuRow);
+		return;
+	}
+
+	if (GetNewKeyState(SDL_SCANCODE_RETURN) || GetNewKeyState(SDL_SCANCODE_KP_ENTER))
+	{
+		PlayConfirmEffect();
+		SetTextInputActive(false);
+		gNav->menuState = kMenuStateReady;
+		InvalidateAllInputs();
+		MakeTextInputValueObj(gNav->menuRow);
+		TwitchOutSelection();
+		if (entry->callback)
+			entry->callback(entry);
+		return;
+	}
+
+	int curLen = (int)SDL_strlen(buf);
+	if (GetNewKeyState(SDL_SCANCODE_BACKSPACE) && curLen > 0)
+	{
+		buf[--curLen] = '\0';
+		changed = true;
+	}
+
+	for (int i = 0; gTextInput[i] != '\0' && curLen < (maxLen - 1); i++)
+	{
+		char c = gTextInput[i];
+		if (!entry->textInput.ipOnly && c >= 'a' && c <= 'z')
+			c = (char)('A' + (c - 'a'));
+
+		Boolean allowed = false;
+		if (entry->textInput.ipOnly)
+		{
+			allowed = ((c >= '0' && c <= '9') || c == '.' || c == ':');
+		}
+		else
+		{
+			allowed = ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+			           c == ' ' || c == '.' || c == '-' || c == '_');
+		}
+
+		if (allowed)
+		{
+			buf[curLen++] = c;
+			buf[curLen] = '\0';
+			changed = true;
+		}
+	}
+
+	if (changed)
+	{
+		gNav->idleTime = 0;
+		MakeTextInputValueObj(gNav->menuRow);
+	}
+}
+
 static void NavigateMenu(void)
 {
 	GAME_ASSERT(gNav->style.isInteractive);
@@ -1681,6 +1803,8 @@ static ObjNode* MakeText(const char* text, int row, int desiredCol, int textMesh
 
 static const char* GetMenuItemLabel(const MenuItem* entry)
 {
+	if (entry->getDynamicText)
+		return entry->getDynamicText(entry);
 	return Localize(entry->text);
 }
 
@@ -1855,6 +1979,24 @@ static ObjNode* LayOutMouseBinding(int row)
 
 	ObjNode* keyNode = MakeText(GetMouseBindingName(row), row, 1, 0);
 	keyNode->MoveCall = MoveControlBinding;
+
+	return label;
+}
+
+static ObjNode* LayOutTextInput(int row)
+{
+	DECLARE_WORKBUF(buf, bufSize);
+	const MenuItem* entry = &gNav->menu[row];
+
+	SDL_snprintf(buf, bufSize, "%s:", GetMenuItemLabel(entry));
+
+	ObjNode* label = MakeText(buf, row, 0, kTextMeshAlignLeft);
+	label->Coord.x -= 220;
+	label->ColorFilter = gNav->style.labelColor;
+	label->MoveCall = MoveLabel;
+
+	ObjNode* valObj = MakeTextInputValueObj(row);
+	valObj->Coord.x = 120;
 
 	return label;
 }
@@ -2045,6 +2187,7 @@ int StartMenu(
 			&& gNav->menuState != kMenuStateAwaitingPadPress
 			&& gNav->menuState != kMenuStateAwaitingKeyPress
 			&& gNav->menuState != kMenuStateAwaitingMouseClick
+			&& gNav->menuState != kMenuStateEditingText
 			)
 		{
 			gNav->menuState = kMenuStateFadeOut;
@@ -2102,6 +2245,10 @@ int StartMenu(
 				AwaitMouseClick();
 				break;
 
+			case kMenuStateEditingText:
+				AwaitTextInput();
+				break;
+
 			default:
 				break;
 		}
@@ -2117,6 +2264,8 @@ int StartMenu(
 
 		OGL_DrawScene(draw);
 	}
+
+	SetTextInputActive(false);
 
 
 		/* FADE OUT */

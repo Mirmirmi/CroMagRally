@@ -30,7 +30,8 @@ static Boolean PlayGame_Tournament(void);
 static Boolean PlayGame_Tag(void);
 static Boolean PlayGame_Survival(void);
 static Boolean PlayGame_CaptureTheFlag(void);
-static void UpdateGameModeSpecifics(void);
+void UpdateGameModeSpecifics(void);
+void UpdateGameModeSpecifics(void);
 
 static void TallyTokens(void);
 
@@ -187,7 +188,11 @@ static Boolean PlayGame(void)
 	if (!gIsSelfRunningDemo && gNumLocalPlayers > 1)
 	{
 		if (DoLocalGatherScreen())
+		{
+			if (gNetGameInProgress)
+				EndNetworkGame();
 			return true;
+		}
 		LockPlayerGamepadMapping();
 	}
 
@@ -933,7 +938,16 @@ static void PlayArea(void)
 
 		if (gIsNetworkClient)
 		{
-			ClientReceive_ControlInfoFromHost();			// read all player's control info back from the Host once he's gathered it all
+			ReadKeyboard();
+			GetLocalKeyState();
+			ClientSend_ControlInfoToHost();
+			ClientReceive_ControlInfoFromHost();
+
+			MoveEverything();
+			Net_ClientUpdateVisualFrame();
+			if (gGameMode == GAME_MODE_TAG1 || gGameMode == GAME_MODE_TAG2)
+				UpdateTagMarker();
+			DoPlayerTerrainUpdate();
 		}
 
 				/* HOST OR NON-NET */
@@ -942,53 +956,28 @@ static void PlayArea(void)
 			ReadKeyboard();									// read local keys
 			GetLocalKeyState();								// build a control state bitfield
 
-				/* NETWORK HOST*/
-
 			if (gIsNetworkHost)
-			{
-				HostSend_ControlInfoToClients();			// now send everyone's key states to all clients
-			}
-		}
-
+				HostReceive_ControlInfoFromClients();
 
 				/****************/
 				/* MOVE OBJECTS */
 				/****************/
 
-		MoveEverything();
+			MoveEverything();
 
 				/* DO GAME MODE SPECIFICS */
 
-		UpdateGameModeSpecifics();
+			UpdateGameModeSpecifics();
 
+				/* UPDATE THE TERRAIN */
 
-			/* UPDATE THE TERRAIN */
+			DoPlayerTerrainUpdate();
 
-		DoPlayerTerrainUpdate();
+				/* NETWORK HOST */
 
-
-
-
-			/****************************/
-			/* SEND NET CLIENT KEY INFO */
-			/****************************/
-			//
-			// We can do this anytime AFTER this frame's key control info is no longer needed.
-			// Since this will change the control bits, we MUST BE SURE that the bits are not
-			// used again until the next frame!
-			//
-			// For best performance, we do this before the render function.  That way there is
-			// time for this send to get to the host while we're still waiting for the render to
-			// complete - we essentially get this send for free!
-			//
-
-		if (gIsNetworkClient)
-		{
-			ReadKeyboard();									// read local client keys
-			GetLocalKeyState();								// build a control state bitfield
-			ClientSend_ControlInfoToHost();					// send this info to the host to be used the next frame
+			if (gIsNetworkHost)
+				HostSend_ControlInfoToClients();			// broadcast snapshot & events to clients
 		}
-
 
 
 			/***************/
@@ -996,22 +985,6 @@ static void PlayArea(void)
 			/***************/
 
 		OGL_DrawScene(DrawTerrain);
-
-
-
-
-			/************************************/
-			/* NET HOST RECEIVE CLIENT KEY INFO */
-			/************************************/
-			//
-			// Odds are that the clients have all sent their control into to the Host by now,
-			// so the Host can read all of the client key info for use on the next frame.
-			//
-
-		if (gIsNetworkHost)
-		{
-			HostReceive_ControlInfoFromClients();		// get client info
-		}
 
 
 			/**************/
@@ -1061,8 +1034,7 @@ static void PlayArea(void)
 				DoPaused();
 		}
 
-		if (!gIsNetworkClient)						// clients dont need to calc frame rate since its passed to them from host.
-			CalcFramesPerSecond();
+		CalcFramesPerSecond();
 
 		gGameFrameNum++;
 
@@ -1216,10 +1188,11 @@ short				numPanes;
 			/* MAKE VIEW */
 			/*************/
 
-	if (gNetGameInProgress)
+	numPanes = gNumLocalPlayers;
+	if (numPanes < 1)
 		numPanes = 1;
-	else
-		numPanes = gNumRealPlayers;
+	if (numPanes > MAX_LOCAL_PLAYERS)
+		numPanes = MAX_LOCAL_PLAYERS;
 
 
 			/* SETUP VIEW DEF */
@@ -1469,7 +1442,7 @@ static Boolean AreAnyHumansAlive(void)
 	return(false);
 }
 
-static void UpdateGameModeSpecifics(void)
+void UpdateGameModeSpecifics(void)
 {
 short	i,t,winner;
 
@@ -1514,6 +1487,9 @@ short	i,t,winner;
 							else
 								ShowWinLose(i, 1, winner);					// won!
 						}
+
+						if (gIsNetworkHost)
+							Net_HostSendGameOver(winner);
 					}
 					else if (!AreAnyHumansAlive())
 					{
@@ -1524,12 +1500,17 @@ short	i,t,winner;
 
 						for (i = 0; i < gNumTotalPlayers; i++)
 							ShowWinLose(i, 2, -1);
+
+						if (gIsNetworkHost)
+							Net_HostSendGameOver(-1);
 					}
 
 							/* ELIMINATE THIS PLAYER AND CHOOSE ANOTHER */
 					else
 					{
 						ShowWinLose(gWhoIsIt, 0, 0);						// this player is eliminated
+						if (gIsNetworkHost)
+							Net_HostSendElimination(gWhoIsIt);
 						ChooseTaggedPlayer();								// tagged guy is gone, so choose a new one
 					}
 
@@ -1561,6 +1542,9 @@ short	i,t,winner;
 						else
 							ShowWinLose(i, 2, gWhoIsIt);
 					}
+
+					if (gIsNetworkHost)
+						Net_HostSendGameOver(gWhoIsIt);
 
 				}
 				UpdateTagMarker();
@@ -1602,6 +1586,8 @@ short	i,t,winner;
 					{
 						for (i = 0; i < gNumTotalPlayers; i++)			// all were eliminated
 							ShowWinLose(i, 2, -1);						// lost
+						if (gIsNetworkHost)
+							Net_HostSendGameOver(-1);
 					}
 
 							/* SHOW WINNER/LOSERS */
@@ -1616,6 +1602,8 @@ short	i,t,winner;
 							else
 								ShowWinLose(i, 1, winner);					// won!
 						}
+						if (gIsNetworkHost)
+							Net_HostSendGameOver(winner);
 					}
 				}
 				break;
@@ -1639,6 +1627,19 @@ short	i,t,winner;
 								ShowWinLose(i, 1, 0);								// won!
 							else
 								ShowWinLose(i, 2, 0);								// lost
+						}
+						if (gIsNetworkHost)
+						{
+							short anyTeamMember = 0;
+							for (i = 0; i < gNumTotalPlayers; i++)
+							{
+								if (gPlayerInfo[i].team == t)
+								{
+									anyTeamMember = i;
+									break;
+								}
+							}
+							Net_HostSendGameOver(anyTeamMember);
 						}
 						break;
 					}
@@ -1728,6 +1729,7 @@ void GameMain(void)
 		DoMainMenuScreen();
 
 		PlayGame();
+		ShutdownNetworkManager();
 	}
 }
 

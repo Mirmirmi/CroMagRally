@@ -150,6 +150,7 @@ extern PrefsType				gGamePrefs;
 extern Scoreboard				gScoreboard;
 extern short					gCapturedFlagCount[2];
 extern short					gCurrentPlayerNum;
+extern short					gLocalPlayerNums[MAX_LOCAL_PLAYERS];
 extern short					gMyNetworkPlayerNum;
 extern short					gNumActiveParticleGroups;
 extern short					gNumCollisions;

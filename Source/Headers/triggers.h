@@ -81,3 +81,4 @@ Boolean AddCauldron(TerrainItemEntryType *itemPtr, long  x, long z);
 Boolean AddGong(TerrainItemEntryType *itemPtr, long  x, long z);
 Boolean AddSeaMine(TerrainItemEntryType *itemPtr, long  x, long z);
 Boolean AddDruid(TerrainItemEntryType *itemPtr, long  x, long z);
+void Net_ClientHidePOWTrigger(const TerrainItemEntryType *targetPtr, float timer);

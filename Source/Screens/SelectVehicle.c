@@ -184,11 +184,53 @@ Boolean DoMultiPlayerVehicleSelections(void)
 {
 	if (gNetGameInProgress)
 	{
-		// TODO: We should allow bailing out of Character/Vehicle Select screens, even if we started a net game.
-		DoCharacterSelectScreen(gMyNetworkPlayerNum, false);		// get player's sex
-		DoVehicleSelectScreen(gMyNetworkPlayerNum, false);			// get this player's vehicle
-		PlayerBroadcastVehicleType();								// tell other net players about my type
-		GetVehicleSelectionFromNetPlayers();						// get types from other net players
+		short localCount = gNumLocalPlayers;
+		if (localCount < 1) localCount = 1;
+		if (localCount > MAX_LOCAL_PLAYERS) localCount = MAX_LOCAL_PLAYERS;
+
+		short currentScreen = 0;
+		const short screensPerPlayer = 2;
+		short totalLocalScreens = screensPerPlayer * localCount;
+
+		while (currentScreen < totalLocalScreens)
+		{
+			short pane = currentScreen / screensPerPlayer;
+			short slot = gLocalPlayerNums[pane];
+			short screenToShow = currentScreen % screensPerPlayer;
+			Boolean bailed = false;
+
+			switch (screenToShow)
+			{
+				case 0:
+					bailed = DoCharacterSelectScreen(slot, true);
+					break;
+
+				case 1:
+					bailed = DoVehicleSelectScreen(slot, true);
+					break;
+			}
+
+			if (bailed)
+			{
+				if (currentScreen == 0)
+				{
+					Net_DisconnectGracefully();
+					return true;
+				}
+				currentScreen--;
+			}
+			else
+			{
+				currentScreen++;
+			}
+		}
+
+		PlayerBroadcastVehicleType();								// tell other net players about all local seats
+		if (GetVehicleSelectionFromNetPlayers())					// get types from other net players
+		{
+			Net_DisconnectGracefully();
+			return true;
+		}
 		return false;
 	}
 	else
@@ -283,6 +325,8 @@ Boolean DoVehicleSelectScreen(short whichPlayer, Boolean allowAborting)
 
 		CalcFramesPerSecond();
 		ReadKeyboard();
+		if (gNetGameInProgress)
+			Net_PollLobby();
 		MoveObjects();
 		OGL_DrawScene(DrawObjects);
 	}
@@ -297,7 +341,10 @@ Boolean DoVehicleSelectScreen(short whichPlayer, Boolean allowAborting)
 	{
 		gGameView->fadePillarbox = true;
 
-		if (whichPlayer == gNumRealPlayers-1 &&
+		Boolean isLastLocal = gNetGameInProgress
+			? (gPlayerInfo[whichPlayer].splitPaneNum == gNumLocalPlayers - 1)
+			: (whichPlayer == gNumRealPlayers - 1);
+		if (isLastLocal &&
 			((gGameMode != GAME_MODE_MULTIPLAYERRACE && !IsBattleGameMode(gGameMode)) || gNetGameInProgress))
 		{
 			gGameView->fadeSound = true;
@@ -619,10 +666,9 @@ static Boolean DoVehicleSelectControls(short whichPlayer, Boolean allowAborting)
 short	p;
 
 
-	if (gNetGameInProgress)										// if net game, then use P0 controls
+	p = gNetGameInProgress ? gPlayerInfo[whichPlayer].splitPaneNum : whichPlayer;
+	if (p < 0)
 		p = 0;
-	else
-		p = whichPlayer;										// otherwise, use P0 or P1 controls depending.
 
 
 		/* SEE IF ABORT */

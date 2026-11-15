@@ -1,1528 +1,2285 @@
 /****************************/
-/*   	  NETWORK.C	   	    */
+/*        NETWORK.C         */
 /* (c)2000 Pangea Software  */
-/* By Brian Greenstone      */
+/* LAN ENet Rewrite (2026)  */
 /****************************/
 
-typedef void* NSpMessageHeader;
-typedef void* NSpPlayerLeftMessage;
+#ifdef _WIN32
+	#define WIN32_LEAN_AND_MEAN
+	#include <winsock2.h>
+	#include <ws2tcpip.h>
+	typedef int socklen_t;
+#else
+	#include <sys/types.h>
+	#include <sys/socket.h>
+	#include <netinet/in.h>
+	#include <arpa/inet.h>
+	#include <fcntl.h>
+	#include <unistd.h>
+	#include <ifaddrs.h>
+	#include <errno.h>
+#endif
 
-
-/***************/
-/* EXTERNALS   */
-/***************/
+#include <enet/enet.h>
+#include <math.h>
+#include <string.h>
 
 #include "game.h"
 #include "network.h"
-#include "window.h"
 
 /**********************/
-/*     PROTOTYPES     */
+/*     CONSTANTS      */
 /**********************/
 
-#if 0
-static void InitPlayerNamesListBox(Rect *r, WindowPtr myDialog);
-//static pascal Boolean GatherGameDialogCallback (DialogRef dp,EventRecord *event, short *item);
-static void ShowNamesOfJoinedPlayers(void);
-static OSErr Client_WaitForGameConfigInfo(void);
-//static pascal Boolean Client_WaitForGameConfigInfoDialogCallback (DialogRef dp,EventRecord *event, short *item);
-static OSErr HostSendGameConfigInfo(void);
-static void HandleGameConfigMessage(NetConfigMessageType *inMessage);
-//static Boolean HandleOtherNetMessage(NSpMessageHeader	*message);
-//static void PlayerUnexpectedlyLeavesGame(NSpPlayerLeftMessage *mess);
-static OSErr  Host_DoGatherPlayersDialog(void);
-static Boolean PlayerReceiveVehicleTypeFromOthers(short *playerNum, short *charType, short *sex);
-#endif
-
-/****************************/
-/*    CONSTANTS             */
-/****************************/
-
-#define	DATA_TIMEOUT	2						// # seconds for data to timeout
-
-#define	kNBPType		"CMR5"
-
-/**********************/
-/*     VARIABLES      */
-/**********************/
-
-static int	gNumGatheredPlayers = 0;			// this is only used during gathering, gNumRealPlayers should be used during game!
-
-Boolean		gNetSprocketInitialized = false;
-
-Boolean		gIsNetworkHost = false;
-Boolean		gIsNetworkClient = false;
-Boolean		gNetGameInProgress = false;
-
-void* /*NSpGameReference*/	gNetGame = nil;
-
-#if 0
-static Str31				gameName;
-static Str31				gNetPlayerName;
-static Str31				password;
-static Str31				kJoinDialogLabel = "Choose a Game:";
-#endif
-
-//ListHandle		gTheList;
-//short			gNumRowsInList;
-Str32			gPlayerNameStrings[MAX_PLAYERS];
-
-uint32_t			gClientSendCounter[MAX_PLAYERS];
-uint32_t			gHostSendCounter;
-int				gTimeoutCounter;
-
-//NetHostControlInfoMessageType	gHostOutMess;
-//NetClientControlInfoMessageType	gClientOutMess;
-
-Boolean		gHostNetworkGame = false;
-Boolean		gJoinNetworkGame = false;
-
-
-/******************* INIT NETWORK MANAGER *********************/
-//
-// Called once at boot
-//
-
-void InitNetworkManager(void)
+enum
 {
-	IMPLEMENT_ME_SOFT();
-#if 0
-OSStatus    iErr;
+	kPlayerSnapFlag_IsIt         = 1 << 0,
+	kPlayerSnapFlag_Eliminated   = 1 << 1,
+	kPlayerSnapFlag_RaceComplete = 1 << 2,
+	kPlayerSnapFlag_IsComputer   = 1 << 3,
+	kPlayerSnapFlag_OnWater      = 1 << 4,
+	kPlayerSnapFlag_IsPlaning    = 1 << 5,
+	kPlayerSnapFlag_GasDown      = 1 << 6,
+	kPlayerSnapFlag_Braking      = 1 << 7,
+	kPlayerSnapFlag_WrongWay     = 1 << 8,
+	kPlayerSnapFlag_MakingSkid   = 1 << 9,
+	kPlayerSnapFlag_SubMarine    = 1 << 10
+};
 
-	if ((!gOSX) || OSX_PACKAGE)
-	{
-	            /*********************/
-	            /* INIT NET SPROCKET */
-	            /*********************/
+#define DISCOVERY_PRUNE_MS       3500u
+#define DISCOVERY_INTERVAL_MS    450u
+#define SNAPSHOT_INTERVAL_MS     16u    /* ~60 Hz max snapshot rate */
+#define INPUT_SEND_INTERVAL_MS   16u    /* ~60 Hz input send rate */
 
-		iErr = NSpInitialize(sizeof(NetHostControlInfoMessageType), kBufferSize, kQElements, kGameID, kTimeout);
-	    if (iErr)
-	        DoFatalAlert("InitNetworkManager: NSpInitialize failed!");
-
-		gNetSprocketInitialized = true;
-	}
+#ifndef _WIN32
+	typedef int NetUDPSocket;
+	#define NET_INVALID_SOCKET (-1)
+	#define NetCloseSocket(s) close(s)
+#else
+	typedef SOCKET NetUDPSocket;
+	#define NET_INVALID_SOCKET INVALID_SOCKET
+	#define NetCloseSocket(s) closesocket(s)
 #endif
+
+/**********************/
+/*     GLOBALS        */
+/**********************/
+
+Boolean gIsNetworkHost = false;
+Boolean gIsNetworkClient = false;
+Boolean gNetGameInProgress = false;
+Str32   gPlayerNameStrings[MAX_PLAYERS];
+
+/**********************/
+/*   STATIC STATE     */
+/**********************/
+
+static Boolean  sENetInitialized = false;
+static uint16_t sGamePort = NET_DEFAULT_PORT;
+static uint16_t sDiscoveryPort = NET_DISCOVERY_PORT;
+
+static ENetHost* sHost = NULL;
+static ENetPeer* sServerPeer = NULL;
+static ENetPeer* sClientPeers[MAX_PLAYERS]; /* index = playerNum (1..MAX_PLAYERS-1) */
+
+static NetUDPSocket sHostDiscoverySock = NET_INVALID_SOCKET;
+static NetUDPSocket sClientDiscoverySock = NET_INVALID_SOCKET;
+static uint32_t     sLastBeaconMs = 0;
+static uint32_t     sLastProbeMs = 0;
+
+static NetLobbyConnectionState sConnState = kNetConn_Idle;
+static char                    sStatusText[128] = "";
+
+static NetLobbyStateMsg        sLobbyState;
+static uint16_t                sMyMachineId = 0;
+static uint16_t                sNextMachineId = 2;
+static Boolean                 sClientMatchStarted = false;
+static Boolean                 sClientLevelGo = false;
+static uint32_t                sPendingSeed = 1;
+static int8_t                  sPendingWhoIsIt = 0;
+
+static Boolean                 sClientLevelPreparedSent[MAX_PLAYERS];
+
+static NetDiscoveredHostInfo   sDiscoveredHosts[NET_MAX_DISCOVERED_HOSTS];
+static int                     sNumDiscoveredHosts = 0;
+
+/* Gameplay sync state */
+static uint32_t           sSendInputSeq = 0;
+static uint32_t           sLastSentInputMs = 0;
+static uint32_t           sClientOutNewAccum[MAX_LOCAL_PLAYERS];
+
+static uint32_t           sSendSnapSeq = 0;
+static uint32_t           sLastSentSnapMs = 0;
+static uint32_t           sLastRecvSnapSeq = 0;
+static Boolean            sHasSnapshot = false;
+static NetHostSnapshotMsg sCurrSnap;
+
+static uint32_t           sHostInputSeq[MAX_PLAYERS];
+static NetClientInputMsg  sHostLatestInput[MAX_PLAYERS];
+static uint32_t           sHostPendingNewBits[MAX_PLAYERS];
+static Boolean            sHostHasInput[MAX_PLAYERS];
+
+typedef struct NetWeaponTracker
+{
+	Boolean  active;
+	uint32_t netId;
+	uint8_t  kind;
+	ObjNode* obj;
+} NetWeaponTracker;
+
+static NetWeaponTracker sHostWeapons[NET_MAX_PROJECTILES];
+static uint32_t         sNextWeaponNetId = 1;
+static NetWeaponTracker sClientWeapons[NET_MAX_PROJECTILES];
+static Boolean          sMatchLost = false;
+
+/**********************/
+/*  INTERNAL HELPERS  */
+/**********************/
+
+static uint32_t NetNowMs(void)
+{
+	return (uint32_t)SDL_GetTicks();
 }
 
-
-/********************** END NETWORK GAME ******************************/
-//
-// Called from CleanupLevel() or when a player bails from game unexpectedly.
-//
-
-void EndNetworkGame(void)
+static void SafeCopyStr(char* dst, size_t dstSize, const char* src)
 {
-	IMPLEMENT_ME_SOFT();
-#if 0
-OSErr	iErr;
+	if (!dst || dstSize == 0)
+		return;
+	if (!src)
+	{
+		dst[0] = '\0';
+		return;
+	}
+	SDL_strlcpy(dst, src, dstSize);
+}
 
-	if ((!gNetGameInProgress) || (!gNetGame))								// only if we're running a net game
+static Boolean SetSocketNonBlockingAndBroadcast(NetUDPSocket sock, Boolean enableBroadcast)
+{
+	if (sock == NET_INVALID_SOCKET)
+		return false;
+
+	int yes = 1;
+	setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (const char*)&yes, sizeof(yes));
+#ifdef SO_REUSEPORT
+	setsockopt(sock, SOL_SOCKET, SO_REUSEPORT, (const char*)&yes, sizeof(yes));
+#endif
+	if (enableBroadcast)
+	{
+		setsockopt(sock, SOL_SOCKET, SO_BROADCAST, (const char*)&yes, sizeof(yes));
+	}
+
+#ifdef _WIN32
+	u_long mode = 1;
+	if (ioctlsocket(sock, FIONBIO, &mode) != 0)
+		return false;
+#else
+	int flags = fcntl(sock, F_GETFL, 0);
+	if (flags < 0)
+		return false;
+	if (fcntl(sock, F_SETFL, flags | O_NONBLOCK) < 0)
+		return false;
+#endif
+	return true;
+}
+
+Boolean Net_IsLANAddress(uint32_t hostOrderIPv4)
+{
+	uint8_t a = (uint8_t)((hostOrderIPv4 >> 24) & 0xFFu);
+	uint8_t b = (uint8_t)((hostOrderIPv4 >> 16) & 0xFFu);
+
+	if (a == 127)
+		return true; /* Loopback 127.0.0.0/8 */
+	if (a == 10)
+		return true; /* RFC1918 10.0.0.0/8 */
+	if (a == 172 && (b >= 16 && b <= 31))
+		return true; /* RFC1918 172.16.0.0/12 */
+	if (a == 192 && b == 168)
+		return true; /* RFC1918 192.168.0.0/16 */
+	if (a == 169 && b == 254)
+		return true; /* Link-local 169.254.0.0/16 */
+
+	return false;
+}
+
+Boolean Net_ParseLANIPString(const char* ipStr, uint32_t* outHostOrderIPv4)
+{
+	if (!ipStr || ipStr[0] == '\0')
+		return false;
+
+	struct in_addr addr;
+	if (inet_pton(AF_INET, ipStr, &addr) != 1)
+		return false;
+
+	uint32_t hostIP = ntohl(addr.s_addr);
+	if (!Net_IsLANAddress(hostIP))
+		return false;
+
+	if (outHostOrderIPv4)
+		*outHostOrderIPv4 = hostIP;
+	return true;
+}
+
+void Net_GetLocalIPString(char* outBuf, size_t bufSize)
+{
+	if (!outBuf || bufSize == 0)
 		return;
 
-		/* THE HOST MUST TERMINATE IT ENTIRELY */
+	SDL_strlcpy(outBuf, "127.0.0.1", bufSize);
 
-	if (gIsNetworkHost)
+#ifndef _WIN32
+	struct ifaddrs* ifaddr = NULL;
+	if (getifaddrs(&ifaddr) == 0 && ifaddr != NULL)
 	{
-		Wait(40);						// do this pause to let clients sync up so they don't get the terminate message prematurely
-		iErr = NSpGame_Dispose(gNetGame, kNSpGameFlag_ForceTerminateGame);	// do not renegotiate a new host
-		if (iErr)
-			DoFatalAlert("EndNetworkGame: NSpGame_Dispose failed!");
-	}
-
-			/* CLIENTS CAN JUST BAIL NORMALLY */
-	else
-	{
-		iErr = NSpGame_Dispose(gNetGame, 0);
-		if (iErr)
-			DoFatalAlert("EndNetworkGame: NSpGame_Dispose failed!");
-	}
-#endif
-
-
-	gNetGameInProgress 	= false;
-	gIsNetworkHost	= false;
-	gIsNetworkClient	= false;
-	gNetGame			= nil;
-	gNumGatheredPlayers	= 0;
-}
-
-
-#pragma mark -
-
-
-
-/****************** SETUP NETWORK HOSTING *********************/
-//
-// Called when this computer's user has selected to be a host for a net game.
-//
-// OUTPUT:  true == cancelled.
-//
-
-Boolean SetupNetworkHosting(void)
-{
-	IMPLEMENT_ME_SOFT();
-	return true;
-#if 0
-OSStatus 					status;
-Boolean 					okHit;
-NSpProtocolListReference	theList = NULL;
-NSpProtocolReference 		atRef;
-
-	GammaOn();
-	Enter2D(true);
-
-	MyFlushEvents();
-
-    gNetGame = nil;
-
-	gHostSendCounter = 0;
-	gTimeoutCounter = 0;
-
-			/* GET SOME NAMES */
-
-	CopyPString(gPlayerSaveData.playerName, gNetPlayerName);
-	// TODO: this is probably STR_RACE + gGameMode - GAME_MODE_MULTIPLAYERRACE
-	GetIndStringC(gameName, 1000 + gGamePrefs.language, 16 + (gGameMode - GAME_MODE_MULTIPLAYERRACE));	// name of game is game mode string
-
-	password[0] = 0;
-
-
-			/* CREATE A PROTOCOL LIST */
-
-	status = NSpProtocolList_New(NULL, &theList);
-	if (status)
-		DoFatalAlert("SetupNetworkHosting: NSpProtocolList_New failed!");
-
-	if (!gOSX)
-	{
-		atRef = NSpProtocol_CreateAppleTalk(gameName,kNBPType, 0,0);		// create appletalk protocol ref
-		NSpProtocolList_Append(theList, atRef);								// append protocol refs
-	}
-
-			/* DO HOSTING UI */
-			//
-			//	Note!  Do NOT pass in string constants, as the user can change these values
-			//
-
-
-	TurnOffISp();
-	InitCursor();
-	okHit = NSpDoModalHostDialog(theList, gameName, gNetPlayerName, password, nil);
-	TurnOnISp();
-	if (!okHit)
-		goto failure;
-
-
-			/* NEW HOST GAME */
-
-	status = NSpGame_Host(&gNetGame, theList, MAX_PLAYERS, gameName,
-				password, gNetPlayerName, 0, kNSpClientServer, 0);
-	if (status || (gNetGame==nil))
-	{
-		DoAlert("SetupNetworkHosting: NSpGame_Host failed!");
-		ShowSystemErr_NonFatal(status);	//----------
-		goto failure;
-	}
-
-
-			/* LET USERS JOIN IN */
-
-	if (Host_DoGatherPlayersDialog())
-		goto failure;
-
-
-
-		/*************************************/
-		/* TELL ALL CLIENT PLAYERS SOME INFO */
-		/*************************************/
-
-	if (HostSendGameConfigInfo())
-	    goto failure;
-
-	HideCursor();
-	return(false);
-
-
-			/* SOMETHING WENT WRONG, SO BE GRACEFUL */
-
-failure:
-
-    if (gNetGame)
-    {
-        NSpGame_Dispose(gNetGame, 0);
-        gNetGame = nil;
-    }
-
-	if (theList != nil)
-		NSpProtocolList_Dispose(theList);
-
-	HideCursor();
-
-	Exit2D();
-	return(true);
-#endif
-}
-
-
-/*************** SETUP NETWORK JOIN ************************/
-//
-// OUTPUT:	false == let's go!
-//			true = cancel
-//
-
-Boolean SetupNetworkJoin(void)
-{
-	IMPLEMENT_ME_SOFT();
-	return true;
-#if 0
-NSpAddressReference	theAddress;
-OSStatus			status;
-int					i;
-
-
-//	GameScreenToBlack();
-	GammaOn();
-	Enter2D(true);
-
-	MyFlushEvents();
-	InitCursor();
-
-	gNetGame = nil;
-
-	for (i = 0; i < MAX_PLAYERS; i++)
-		gClientSendCounter[i] = 0;
-	gTimeoutCounter = 0;
-
-	CopyPString(gPlayerSaveData.playerName, gNetPlayerName);		// use loaded player's name
-	password[0] = 0;
-
-			/* DO UI FOR JOINING GAME */
-			//
-			//	passing an empty string (not nil) for the type causes NetSprocket to use the game id passed in to initialize
-			//
-
-	TurnOffISp();
-	theAddress = NSpDoModalJoinDialog(kNBPType, kJoinDialogLabel, gNetPlayerName, password, NULL);
-	TurnOnISp();
-
-	if (theAddress == NULL)		// The user cancelled
-	{
-		HideCursor();
-		return(true);
-	}
-
-
-				/* JOIN IN */
-
-	status = NSpGame_Join(&gNetGame, theAddress, gNetPlayerName, password, 0, NULL, 0, 0);
-	if (status)
-	{
-		HideCursor();
-		return(true);												// an error will occur if user selects "blank" line in dialog above (sounds like an NSp bug to me!)
-	}
-
-	NSpReleaseAddressReference(theAddress);							// always dispose of this after _Join
-
-
-			/* WAIT WHILE OTHERS JOIN ALSO */
-
-	status = Client_WaitForGameConfigInfo();
-	if (status)
-	{
-        if (gNetGame)
-        {
-            NSpGame_Dispose(gNetGame, 0);
-            gNetGame = nil;
-        }
-	}
-
-	HideCursor();
-	Exit2D();
-	return status;
-#endif
-}
-
-
-#pragma mark -
-
-/********************* DO MY CUSTOM GATHER GAME DIALOG **********************/
-//
-// Displays dialog which shows all currently gathered players.
-//
-// OUTPUT: OSErr = noErr if all's well.
-//
-
-#if 0
-static OSErr  Host_DoGatherPlayersDialog(void)
-{
- 	IMPLEMENT_ME_SOFT();
-	return unimpErr;
-DialogRef 		myDialog;
-DialogItemType			itemType,itemHit;
-ControlHandle	itemHandle;
-Rect			itemRect;
-Boolean			dialogDone,cancelled = false;
-ModalFilterUPP	myProc;
-
-	FlushEvents (everyEvent, REMOVE_ALL_EVENTS);
-	FlushEventQueue(GetMainEventQueue());
-
-	gNumGatheredPlayers = 0;												// noone gathered yet
-
-	myDialog = GetNewDialog(130,nil,MOVE_TO_FRONT);
-
-
-			/* SET OUTLINE FOR USERITEM */
-
-	GetDialogItem(myDialog,1,&itemType,(Handle *)&itemHandle,&itemRect);					// default button
-	SetDialogItem(myDialog, 2, userItem, (Handle)NewUserItemUPP(DoBold), &itemRect);
-
-
-			/* INIT LIST BOX */
-
-	GetDialogItem(myDialog,4,&itemType,(Handle *)&itemHandle,&itemRect);					// player's box
-	SetDialogItem(myDialog,4, userItem,(Handle)NewUserItemUPP(DoOutline), &itemRect);
-	InitPlayerNamesListBox(&itemRect,GetDialogWindow(myDialog));													// create list manager list
-
-
-				/*************/
-				/* DO DIALOG */
-				/*************/
-
-	dialogDone = false;
-	myProc = NewModalFilterUPP(GatherGameDialogCallback);
-	while(dialogDone == false)
-	{
-		ModalDialog(myProc, &itemHit);
-		switch (itemHit)
+		for (struct ifaddrs* ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next)
 		{
-			case 	3:
-					cancelled = true;
-					dialogDone = true;
-					break;
-
-			case	1:									// see if PLAY
-					dialogDone = true;
-					break;
-		}
-	}
-
-		/* STOP ADVERTISING THIS GAME SINCE WE'RE ALL SET TO GO */
-
-	NSpGame_EnableAdvertising(gNetGame, nil, false);
-
-
-			/* CLEANUP */
-
-	DisposeModalFilterUPP(myProc);
-	DisposeDialog(myDialog);
-
-	GameScreenToBlack();
-	return(cancelled);
-}
-
-
-/******************** INIT GATHER LIST BOX *************************/
-//
-// Creates the List Manager list box which will contain a list of all the joiners in this game.
-//
-
-static void InitPlayerNamesListBox(Rect *r, WindowPtr myDialog)
-{
-Rect	dataBounds;
-Point	cSize;
-
-	r->right -= 15;														// make room for scroll bars & outline
-	r->top += 1;
-	r->bottom -= 1;
-	r->left += 1;
-
-	gNumRowsInList = 0;
-	SetRect(&dataBounds,0,0,1,gNumRowsInList);							// no entries yet
-	cSize.h = cSize.v = 0;
-	gTheList = LNew(r, &dataBounds, cSize, 0, myDialog, true, false, false, false);
-
-	ShowNamesOfJoinedPlayers();
-}
-
-
-
-/**************** GATHER GAME DIALOG CALLBACK *************************/
-
-static Boolean GatherGameDialogCallback (DialogRef dp,EventRecord *event, short *item)
-{
-	IMPLEMENT_ME_SOFT();
-	return true;
-#if 0
-char 			c;
-Point			eventPoint;
-static	long	tick = 0;
-NSpMessageHeader	*message;
-
-	dp; item;
-
-				/* HANDLE DIALOG EVENTS */
-
-	SetPort(GetDialogPort(dp));										// make sure we're drawing to this dialog
-
-	switch(event->what)
-	{
-		case	keyDown:								// we have a key press
-				c = event->message & 0x00FF;			// what character is it?
-				break;
-
-		case	mouseDown:								// mouse was clicked
-				eventPoint = event->where;				// get the location of click
-				GlobalToLocal (&eventPoint);			// got to make it local
-				break;
-	}
-
-			/*******************************************/
-			/* CHECK FOR OTHER PLAYERS WANTING TO JOIN */
-			/*******************************************/
-
-	while ((message = NSpMessage_Get(gNetGame)) != NULL)	// read Net message
-	{
-		switch(message->what)
-		{
-			case	kNSpPlayerLeft:						// see if someone decided to un-join
-					ShowNamesOfJoinedPlayers();
-					break;
-
-			case 	kNSpPlayerJoined:					// see if we've got a new player joining
-			case	kNSpJoinRequest:
-					ShowNamesOfJoinedPlayers();
-					break;
-
-			default:
-					HandleOtherNetMessage(message);
-		}
-		NSpMessage_Release(gNetGame, message);
-	}
-
-			/* KEEP MUSIC PLAYING */
-
-	if (gSongPlayingFlag)
-		MoviesTask(gSongMovie, 0);
-
-	return(false);
-#endif
-}
-
-
-/***************** SHOW NAMES OF JOINED PLAYERS ************************/
-//
-// For the Gather Game and Wait for Config dialogs, it displays list of joined players by updating
-// the List Manager list for this dialog.
-//
-
-static void ShowNamesOfJoinedPlayers(void)
-{
-	IMPLEMENT_ME_SOFT();
-#if 0
-short	i;
-Cell	theCell;
-NSpPlayerEnumerationPtr	players;
-OSStatus	status;
-
-
-	status = NSpPlayer_GetEnumeration(gNetGame, &players);
-	if (status != noErr)
-		return;
-
-		/* COPY NBP NAMES INTO LIST BUFFER */
-
-	gNumGatheredPlayers =  players->count;
-	for (i=0; i < gNumGatheredPlayers; i++)
-	{
-		NSpPlayerInfoPtr	thePlayer;
-
-		NSpPlayer_GetInfo(gNetGame, players->playerInfo[i]->id, &thePlayer);
-
-		CopyPStr(thePlayer->name, gPlayerNameStrings[i]);
-	}
-
-	NSpPlayer_ReleaseEnumeration(gNetGame, players);
-
-
-		/* DELETE ALL EXISTING ROWS IN LIST */
-
-	LDelRow(0, 0, gTheList);
-	gNumRowsInList = 0;
-
-
-			/* ADD NAMES TO LIST */
-
-	if (gNumGatheredPlayers > 0)
-		LAddRow(gNumGatheredPlayers, 0, gTheList);		// create rows
-
-
-	for (i=0; i < gNumGatheredPlayers; i++)
-	{
-		if (i == (gNumGatheredPlayers-1))				// reactivate draw on last cell
-			LSetDrawingMode(true,gTheList);							// turn on updating
-		theCell.h = 0;
-		theCell.v = i;
-		LSetCell(&gPlayerNameStrings[i][1], gPlayerNameStrings[i][0], theCell, gTheList);
-		gNumRowsInList++;
-	}
-#endif
-}
-
-
-
-
-#pragma mark -
-
-/*********************** SEND GAME CONFIGURATION INFO *******************************/
-//
-// Once everyone is in and we (the host) start things, then send this to all players to tell them we're on!
-//
-
-static OSErr HostSendGameConfigInfo(void)
-{
-	IMPLEMENT_ME_SOFT();
-	return unimpErr;
-#if 0
-OSStatus				status;
-NetConfigMessageType			message;
-NSpPlayerEnumerationPtr	playerList;
-NSpPlayerID				hostID,clientID;
-short					i,p;
-NSpPlayerInfoPtr		playerInfoPtr;
-
-			/* GET PLAYER INFO */
-
-	hostID = NSpPlayer_GetMyID(gNetGame);							// get my/host ID
-	status = NSpPlayer_GetEnumeration(gNetGame, &playerList);
-	gNumRealPlayers = playerList->count;							// get # players (host + clients)
-
-	gMyNetworkPlayerNum = 0;										// the host is always player #0
-
-
-			/***********************************************/
-			/* SEND GAME CONFIGURATION INFO TO ALL PLAYERS */
-			/***********************************************/
-			//
-			// Send one message at a time to each individual client player with
-			// specific info for each client.
-			//
-
-	p = 1;															// start assigning player nums at 1 since Host is always #0
-	for (i = 0; i < gNumRealPlayers; i++)
-	{
-		playerInfoPtr =  playerList->playerInfo[i];					// point to NSp's player info list
-
-		gPlayerInfo[i].nspPlayerID = clientID = playerInfoPtr->id;	// get NSp's playerID (for use when player leaves game)
-
-		if (clientID != hostID)										// don't send start info to myself/host
-		{
-					/* MAKE NEW MESSAGE */
-
-			NSpClearMessageHeader(&message.h);
-			message.h.to 			= clientID;						// send to this client
-			message.h.what 			= kNetConfigureMessage;			// set message type
-			message.h.messageLen 	= sizeof(message);				// set size of message
-
-			message.gameMode 		= gGameMode;					// set game Mode
-			message.age		 		= gTheAge;						// set Age
-			message.trackNum		= gTrackNum;					// set track #
-			message.numPlayers 		= gNumRealPlayers;				// set # players
-			message.playerNum 		= p++;							// set player #
-			message.numAgesCompleted = gPlayerSaveData.numAgesCompleted;
-			message.difficulty		= gGamePrefs.difficulty;		// set difficulty
-			message.tagDuration		= gGamePrefs.tagDuration;		// set tag duration
-
-			status = NSpMessage_Send(gNetGame, &message.h, kNSpSendFlag_Registered);	// send message
-			if (status)
+			if (!ifa->ifa_addr || ifa->ifa_addr->sa_family != AF_INET)
+				continue;
+
+			const struct sockaddr_in* sa = (const struct sockaddr_in*)ifa->ifa_addr;
+			uint32_t ip = ntohl(sa->sin_addr.s_addr);
+			if ((ip >> 24) == 127)
+				continue; /* prefer non-loopback LAN interface if available */
+			if (Net_IsLANAddress(ip))
 			{
-				DoAlert("HostSendGameConfigInfo: NSpMessage_Send failed!");
+				inet_ntop(AF_INET, &sa->sin_addr, outBuf, (socklen_t)bufSize);
 				break;
+			}
+		}
+		freeifaddrs(ifaddr);
+		return;
+	}
+#endif
+
+	/* Fallback UDP getsockname trick (no traffic sent) */
+	NetUDPSocket tmpSock = socket(AF_INET, SOCK_DGRAM, 0);
+	if (tmpSock != NET_INVALID_SOCKET)
+	{
+		struct sockaddr_in remoteAddr;
+		memset(&remoteAddr, 0, sizeof(remoteAddr));
+		remoteAddr.sin_family = AF_INET;
+		remoteAddr.sin_port = htons(53);
+		inet_pton(AF_INET, "192.168.1.1", &remoteAddr.sin_addr);
+
+		if (connect(tmpSock, (struct sockaddr*)&remoteAddr, sizeof(remoteAddr)) == 0)
+		{
+			struct sockaddr_in localAddr;
+			socklen_t addrLen = sizeof(localAddr);
+			if (getsockname(tmpSock, (struct sockaddr*)&localAddr, &addrLen) == 0)
+			{
+				uint32_t ip = ntohl(localAddr.sin_addr.s_addr);
+				if (Net_IsLANAddress(ip) && ip != 0)
+				{
+					inet_ntop(AF_INET, &localAddr.sin_addr, outBuf, (socklen_t)bufSize);
+				}
+			}
+		}
+		NetCloseSocket(tmpSock);
+	}
+}
+
+static void SendENetPacket(ENetPeer* peer, uint8_t channel, const void* data, size_t size, enet_uint32 flags)
+{
+	if (!peer || !data || size == 0)
+		return;
+	ENetPacket* pkt = enet_packet_create(data, size, flags);
+	if (pkt)
+	{
+		if (enet_peer_send(peer, channel, pkt) < 0)
+			enet_packet_destroy(pkt);
+	}
+}
+
+static void BroadcastENetPacketToClients(uint8_t channel, const void* data, size_t size, enet_uint32 flags, int skipPlayer)
+{
+	if (!sHost)
+		return;
+
+	ENetPeer* sentPeers[MAX_PLAYERS];
+	int sentCount = 0;
+
+	for (int i = 0; i < MAX_PLAYERS; i++)
+	{
+		if (i == skipPlayer)
+			continue;
+		ENetPeer* peer = sClientPeers[i];
+		if (!peer)
+			continue;
+
+		/* Deduplicate when one remote peer owns multiple split-screen slots */
+		Boolean alreadySent = false;
+		for (int j = 0; j < sentCount; j++)
+		{
+			if (sentPeers[j] == peer)
+			{
+				alreadySent = true;
+				break;
+			}
+		}
+		if (!alreadySent)
+		{
+			sentPeers[sentCount++] = peer;
+			SendENetPacket(peer, channel, data, size, flags);
+		}
+	}
+}
+
+static void SyncPlayerNamesFromLobby(void)
+{
+	for (int i = 0; i < MAX_PLAYERS; i++)
+	{
+		SDL_memset(gPlayerNameStrings[i], 0, sizeof(gPlayerNameStrings[i]));
+		if (i < sLobbyState.numRealPlayers && sLobbyState.players[i].active)
+		{
+			SafeCopyStr(gPlayerNameStrings[i], sizeof(gPlayerNameStrings[i]), sLobbyState.players[i].name);
+		}
+		else
+		{
+			SDL_snprintf(gPlayerNameStrings[i], sizeof(gPlayerNameStrings[i]), "CPU %d", i + 1);
+		}
+	}
+}
+
+static void ApplyLobbyStateToGlobals(void)
+{
+	gGameMode = sLobbyState.gameMode;
+	gTheAge = sLobbyState.age;
+	gTrackNum = sLobbyState.trackNum;
+	gGamePrefs.difficulty = sLobbyState.difficulty;
+	if (sLobbyState.tagDuration > 0)
+		gGamePrefs.tagDuration = sLobbyState.tagDuration;
+	gMultiplayerCPUs = (sLobbyState.multiplayerCPUs != 0);
+	gNumRealPlayers = sLobbyState.numRealPlayers;
+	if (gNumRealPlayers < 1)
+		gNumRealPlayers = 1;
+	if (gNumRealPlayers > MAX_PLAYERS)
+		gNumRealPlayers = MAX_PLAYERS;
+
+	if (gIsNetworkClient && sMyMachineId != 0)
+	{
+		int found = 0;
+		for (int i = 0; i < MAX_PLAYERS && found < MAX_LOCAL_PLAYERS; i++)
+		{
+			if (sLobbyState.players[i].active && sLobbyState.players[i].machineId == sMyMachineId)
+			{
+				gLocalPlayerNums[found++] = (short)i;
+			}
+		}
+		if (found > 0)
+		{
+			gNumLocalPlayers = (short)found;
+			gMyNetworkPlayerNum = gLocalPlayerNums[0];
+		}
+	}
+
+	for (int i = 0; i < MAX_PLAYERS; i++)
+	{
+		if (sLobbyState.players[i].active && sLobbyState.players[i].vehicleSelected)
+		{
+			gPlayerInfo[i].sex = sLobbyState.players[i].sex;
+			gPlayerInfo[i].vehicleType = sLobbyState.players[i].vehicleType;
+			gPlayerInfo[i].skin = sLobbyState.players[i].skin;
+			gPlayerInfo[i].team = sLobbyState.players[i].team;
+		}
+	}
+
+	SyncPlayerNamesFromLobby();
+}
+
+static void BroadcastLobbyState(void)
+{
+	if (!sHost || !gIsNetworkHost)
+		return;
+
+	sLobbyState.msgType = kNetMsgLobbyState;
+	sLobbyState.gameMode = (uint8_t)gGameMode;
+	sLobbyState.age = (uint8_t)gTheAge;
+	sLobbyState.trackNum = (uint8_t)gTrackNum;
+	sLobbyState.difficulty = (uint8_t)gGamePrefs.difficulty;
+	sLobbyState.multiplayerCPUs = gMultiplayerCPUs ? 1 : 0;
+	sLobbyState.tagDuration = (uint8_t)gGamePrefs.tagDuration;
+
+	/* Recompute active count across all Host + Client seats */
+	int activeCount = 0;
+	for (int i = 0; i < MAX_PLAYERS; i++)
+	{
+		if (sLobbyState.players[i].active)
+			activeCount++;
+	}
+	sLobbyState.numRealPlayers = (uint8_t)activeCount;
+	gNumRealPlayers = (short)(activeCount > 0 ? activeCount : 1);
+	SyncPlayerNamesFromLobby();
+
+	BroadcastENetPacketToClients(NET_CHANNEL_RELIABLE, &sLobbyState, sizeof(sLobbyState), ENET_PACKET_FLAG_RELIABLE, -1);
+}
+
+static void BuildBeaconPacket(NetDiscoveryBeaconPacket* pkt)
+{
+	memset(pkt, 0, sizeof(*pkt));
+	pkt->magic = NET_MAGIC;
+	pkt->version = NET_PROTOCOL_VERSION;
+	pkt->gamePort = sGamePort;
+	pkt->gameMode = sLobbyState.gameMode;
+	pkt->age = sLobbyState.age;
+	pkt->trackNum = sLobbyState.trackNum;
+	pkt->curPlayers = sLobbyState.numRealPlayers;
+	pkt->maxPlayers = MAX_PLAYERS;
+	pkt->inProgress = sLobbyState.matchStarted;
+	SafeCopyStr(pkt->hostName, sizeof(pkt->hostName), sLobbyState.players[0].name);
+}
+
+static void PollHostDiscoverySocket(void)
+{
+	if (sHostDiscoverySock == NET_INVALID_SOCKET)
+		return;
+
+	uint32_t now = NetNowMs();
+	NetDiscoveryBeaconPacket beacon;
+	BuildBeaconPacket(&beacon);
+
+	/* Receive any probes and reply directly */
+	for (;;)
+	{
+		NetDiscoveryProbePacket probe;
+		struct sockaddr_in fromAddr;
+		socklen_t fromLen = sizeof(fromAddr);
+		int n = (int)recvfrom(sHostDiscoverySock, (char*)&probe, sizeof(probe), 0,
+		                      (struct sockaddr*)&fromAddr, &fromLen);
+		if (n <= 0)
+			break;
+
+		if (n == (int)sizeof(probe) && probe.magic == NET_MAGIC && probe.version == NET_PROTOCOL_VERSION)
+		{
+			uint32_t fromIP = ntohl(fromAddr.sin_addr.s_addr);
+			if (Net_IsLANAddress(fromIP))
+			{
+				sendto(sHostDiscoverySock, (const char*)&beacon, sizeof(beacon), 0,
+				       (struct sockaddr*)&fromAddr, fromLen);
 			}
 		}
 	}
 
-			/************/
-			/* CLEAN UP */
-			/************/
+	/* Periodic LAN broadcast beacon while lobby is open */
+	if (!sLobbyState.matchStarted && (now - sLastBeaconMs) >= DISCOVERY_INTERVAL_MS)
+	{
+		sLastBeaconMs = now;
+		struct sockaddr_in bcastAddr;
+		memset(&bcastAddr, 0, sizeof(bcastAddr));
+		bcastAddr.sin_family = AF_INET;
+		bcastAddr.sin_port = htons(sDiscoveryPort);
+		bcastAddr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
+		sendto(sHostDiscoverySock, (const char*)&beacon, sizeof(beacon), 0,
+		       (struct sockaddr*)&bcastAddr, sizeof(bcastAddr));
 
-	NSpPlayer_ReleaseEnumeration(gNetGame,playerList);					// dispose of player list
-
-	return(status);
-#endif
+		/* Also ping loopback in case another local test client listens on discoveryPort */
+		bcastAddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+		sendto(sHostDiscoverySock, (const char*)&beacon, sizeof(beacon), 0,
+		       (struct sockaddr*)&bcastAddr, sizeof(bcastAddr));
+	}
 }
 
-
-
-
-/******************** WAIT FOR GAME CONFIGURATION INFO *****************************/
-//
-// Waits for others to join and then Host to tell me which player # I am et.al.
-//
-// OUTPUT:	OSErr == noErr if all went well, otherwise aborted.
-//
-
-static OSErr Client_WaitForGameConfigInfo(void)
+static void UpsertDiscoveredHost(uint32_t ipHostOrder, const NetDiscoveryBeaconPacket* beacon)
 {
-	IMPLEMENT_ME_SOFT();
-	return unimpErr;
-#if 0
-DialogRef	myDialog;
-Boolean		dialogDone,cancelled;
-DialogItemType			itemType,itemHit,i;
-ControlHandle	itemHandle;
-Rect			itemRect;
-ModalFilterUPP	myProc;
-NSpPlayerEnumerationPtr	playerList;
-NSpPlayerInfoPtr		playerInfoPtr;
+	if (!Net_IsLANAddress(ipHostOrder))
+		return;
+	if (beacon->magic != NET_MAGIC || beacon->version != NET_PROTOCOL_VERSION)
+		return;
+	if (beacon->inProgress)
+		return;
 
-	FlushEvents (everyEvent, REMOVE_ALL_EVENTS);
-	FlushEventQueue(GetMainEventQueue());
-	gNumGatheredPlayers = 0;												// noone gathered yet
-
-
-			/* FIRST GET GAME PLAYER ID'S */
-
-	NSpPlayer_GetEnumeration(gNetGame, &playerList);
-	gNumRealPlayers = playerList->count;									// get # players (host + clients)
-	for (i = 0; i < gNumRealPlayers; i++)
+	uint32_t now = NetNowMs();
+	int targetIdx = -1;
+	for (int i = 0; i < sNumDiscoveredHosts; i++)
 	{
-		playerInfoPtr =  playerList->playerInfo[i];					// point to NSp's player info list
-		gPlayerInfo[i].nspPlayerID = playerInfoPtr->id;					// get NSp's playerID (for use when player leaves game)
-	}
-	NSpPlayer_ReleaseEnumeration(gNetGame,playerList);					// dispose of player list
-
-
-			/********************************************/
-			/* MAKE "WAITING FOR OTHERS TO JOIN" DIALOG */
-			/********************************************/
-
-	myDialog = GetNewDialog(131,nil,MOVE_TO_FRONT);
-
-
-			/* SET OUTLINE FOR USERITEM */
-
-	GetDialogItem(myDialog,1,&itemType,(Handle *)&itemHandle,&itemRect);					// default button
-	SetDialogItem(myDialog, 3, userItem, (Handle)NewUserItemUPP(DoBold), &itemRect);
-
-
-			/* INIT LIST BOX */
-
-	GetDialogItem(myDialog,4,&itemType,(Handle *)&itemHandle,&itemRect);					// player's box
-	SetDialogItem(myDialog,4, userItem,(Handle)NewUserItemUPP(DoOutline), &itemRect);
-	InitPlayerNamesListBox(&itemRect,GetDialogWindow(myDialog));													// create list manager list
-
-
-	/* LET'S WAIT FOR HOST TO TELL US SOMETHING, OR WE CAN ALWAYS CANCEL */
-
-	dialogDone = cancelled = false;
-	myProc = NewModalFilterUPP(Client_WaitForGameConfigInfoDialogCallback);
-	while(dialogDone == false)
-	{
-		ModalDialog(myProc, &itemHit);
-		switch (itemHit)
+		if (sDiscoveredHosts[i].ipHostOrder == ipHostOrder &&
+		    sDiscoveredHosts[i].gamePort == beacon->gamePort)
 		{
-				/* PLAYER CANCELLED */
-
-			case 	1:
-					cancelled = true;
-					dialogDone = true;
-//					NSpGame_Dispose(gNetGame, 0);											// tell host that I'm gone
-					EndNetworkGame();
-					break;
-
-			case	100:
-					dialogDone = true;
-					break;
-			default:
-				dialogDone = false;
+			targetIdx = i;
 			break;
 		}
 	}
 
-	DisposeModalFilterUPP(myProc);
-	DisposeDialog(myDialog);
-	return(cancelled);
-#endif
+	if (targetIdx < 0)
+	{
+		if (sNumDiscoveredHosts >= NET_MAX_DISCOVERED_HOSTS)
+			return;
+		targetIdx = sNumDiscoveredHosts++;
+	}
+
+	NetDiscoveredHostInfo* entry = &sDiscoveredHosts[targetIdx];
+	entry->ipHostOrder = ipHostOrder;
+	struct in_addr addr;
+	addr.s_addr = htonl(ipHostOrder);
+	inet_ntop(AF_INET, &addr, entry->ipString, sizeof(entry->ipString));
+	entry->gamePort = beacon->gamePort;
+	entry->gameMode = beacon->gameMode;
+	entry->age = beacon->age;
+	entry->trackNum = beacon->trackNum;
+	entry->curPlayers = beacon->curPlayers;
+	entry->maxPlayers = beacon->maxPlayers;
+	entry->inProgress = beacon->inProgress;
+	entry->lastSeenMs = now;
+	SafeCopyStr(entry->hostName, sizeof(entry->hostName), beacon->hostName);
 }
 
-
-/********************* WAIT FOR GAME CONFIG INFO: DIALOG CALLBACK ***************************/
-//
-// Returns TRUE if game start info was received.  Upon return, "item" will be set to 100.
-//
-
-#if 0
-static Boolean Client_WaitForGameConfigInfoDialogCallback (DialogRef dp,EventRecord *event, short *item)
+static void HandleJoinRequest(ENetPeer* peer, const NetJoinRequestMsg* req)
 {
-	IMPLEMENT_ME_SOFT();
-	return false;
-#if 0
-NSpMessageHeader *message;
-Boolean handled = false;
+	uint32_t peerIP = ntohl(peer->address.host);
+	NetJoinAckMsg ack;
+	memset(&ack, 0, sizeof(ack));
+	ack.msgType = kNetMsgJoinAck;
 
-	SetPort(GetDialogPort(dp));										// make sure we're drawing to this dialog
-
-
-			/* HANDLE NET SPROCKET EVENTS */
-
-	while ((message = NSpMessage_Get(gNetGame)) != nil)							// get message from Net
+	if (!Net_IsLANAddress(peerIP))
 	{
-		switch(message->what)													// handle message
+		ack.accepted = 0;
+		ack.rejectReason = 1;
+		SendENetPacket(peer, NET_CHANNEL_RELIABLE, &ack, sizeof(ack), ENET_PACKET_FLAG_RELIABLE);
+		enet_peer_disconnect_later(peer, 0);
+		return;
+	}
+
+	if (req->version != NET_PROTOCOL_VERSION || sLobbyState.matchStarted)
+	{
+		ack.accepted = 0;
+		ack.rejectReason = 2;
+		SendENetPacket(peer, NET_CHANNEL_RELIABLE, &ack, sizeof(ack), ENET_PACKET_FLAG_RELIABLE);
+		enet_peer_disconnect_later(peer, 0);
+		return;
+	}
+
+	/* Count active human seats cleanly (always contiguous 0..curActive-1 while in lobby) */
+	int curActive = 0;
+	for (int i = 0; i < MAX_PLAYERS; i++)
+	{
+		if (sLobbyState.players[i].active)
+			curActive++;
+	}
+
+	int reqCount = (int)req->numLocalPlayers;
+	if (reqCount < 1)
+		reqCount = 1;
+	if (reqCount > MAX_LOCAL_PLAYERS)
+		reqCount = MAX_LOCAL_PLAYERS;
+
+	if (curActive + reqCount > MAX_PLAYERS)
+	{
+		ack.accepted = 0;
+		ack.rejectReason = 3; /* server full / not enough free slots */
+		SendENetPacket(peer, NET_CHANNEL_RELIABLE, &ack, sizeof(ack), ENET_PACKET_FLAG_RELIABLE);
+		enet_peer_disconnect_later(peer, 0);
+		return;
+	}
+
+	uint16_t machineId = sNextMachineId++;
+	const char* baseName = (req->playerName[0] != '\0') ? req->playerName : "PLAYER";
+
+	ack.accepted = 1;
+	ack.assignedCount = (uint8_t)reqCount;
+	ack.clientMachineId = machineId;
+
+	for (int k = 0; k < reqCount; k++)
+	{
+		int slot = curActive + k;
+		sClientPeers[slot] = peer;
+		memset(&sLobbyState.players[slot], 0, sizeof(sLobbyState.players[slot]));
+		sLobbyState.players[slot].active = 1;
+		sLobbyState.players[slot].team = (uint8_t)(slot & 1);
+		sLobbyState.players[slot].machineId = machineId;
+
+		if (k == 0)
 		{
-			case	kNetConfigureMessage:										// GOT GAME START INFO
-					HandleGameConfigMessage((NetConfigMessageType *)message);
-					*item = 100;
-					handled = true;
-					goto got_config;
-					break;
+			SafeCopyStr(sLobbyState.players[slot].name, sizeof(sLobbyState.players[slot].name), baseName);
+		}
+		else
+		{
+			SDL_snprintf(sLobbyState.players[slot].name, sizeof(sLobbyState.players[slot].name),
+			             "%.*s P%d", 24, baseName, k + 1);
+		}
+		ack.assignedSlots[k] = (uint8_t)slot;
+	}
 
-			case 	kNSpGameTerminated:											// Host terminated the game :(
-					*item = 1;
-					handled = true;
-					break;
+	SendENetPacket(peer, NET_CHANNEL_RELIABLE, &ack, sizeof(ack), ENET_PACKET_FLAG_RELIABLE);
 
-			case	kNSpJoinApproved:
-					break;
+	BroadcastLobbyState();
+}
 
-			case	kNSpPlayerLeft:												// see if someone decided to un-join
-					ShowNamesOfJoinedPlayers();
-					break;
+static void HandleReliableEventOnClient(const NetReliableEventMsg* ev)
+{
+	switch (ev->kind)
+	{
+		case kNetEvent_POWPickup:
+		{
+			if (gMasterItemList && *gMasterItemList)
+			{
+				const TerrainItemEntryType* targetPtr = &(*gMasterItemList)[ev->paramU32];
+				Net_ClientHidePOWTrigger(targetPtr, ev->f0);
+			}
+			if (ev->a >= 0 && ev->a < MAX_PLAYERS && gPlayerInfo[ev->a].onThisMachine)
+			{
+				PlayEffect(EFFECT_GETPOW);
+			}
+			break;
+		}
 
-			case	kNSpPlayerJoined:
-					ShowNamesOfJoinedPlayers();
-					break;
+		case kNetEvent_Explosion:
+		{
+			OGLVector3D zero = {0.0f, 0.0f, 0.0f};
+			MakeBombExplosion(NULL, ev->f0, ev->f2, &zero);
+			break;
+		}
 
-			case	kNSpError:
-					DoFatalAlert("Client_WaitForGameConfigInfoDialogCallback: message == kNSpError");
+		case kNetEvent_Sound3D:
+		{
+			OGLPoint3D pt = { ev->f0, ev->f1, ev->f2 };
+			PlayEffect_Parms3D(ev->c, &pt, NORMAL_CHANNEL_RATE, ev->f3);
+			break;
+		}
+
+		case kNetEvent_LapOrFinish:
+		{
+			short p = ev->a;
+			if (p >= 0 && p < MAX_PLAYERS)
+			{
+				gPlayerInfo[p].raceComplete = true;
+				gPlayerInfo[p].place = ev->b;
+				if (!gTrackCompleted && gGameMode == GAME_MODE_MULTIPLAYERRACE)
+				{
+					gTrackCompleted = true;
+					gTrackCompletedCoolDownTimer = TRACK_COMPLETE_COOLDOWN_TIME;
+					for (int pane = 0; pane < gNumLocalPlayers && pane < MAX_LOCAL_PLAYERS; pane++)
+					{
+						short slot = gLocalPlayerNums[pane];
+						ShowFinalPlace(slot, (p == slot) ? 0 : -1);
+					}
+				}
+			}
+			break;
+		}
+
+		case kNetEvent_FlagEvent:
+		{
+			gCapturedFlagCount[0] = (Byte)ev->a;
+			gCapturedFlagCount[1] = (Byte)ev->b;
+			if (ev->c == 1)
+				PlayEffect_Parms(EFFECT_REDTEAMWINS, FULL_CHANNEL_VOLUME * 3, FULL_CHANNEL_VOLUME * 2, NORMAL_CHANNEL_RATE);
+			else if (ev->c == 2)
+				PlayEffect_Parms(EFFECT_GREENTEAMWINS, FULL_CHANNEL_VOLUME * 3, FULL_CHANNEL_VOLUME * 2, NORMAL_CHANNEL_RATE);
+			break;
+		}
+
+		case kNetEvent_GameOver:
+		{
+			/* ev->c == 1 => individual elimination, ev->c == 0 => full match over */
+			if (ev->c == 1)
+			{
+				if (ev->a >= 0 && ev->a < MAX_PLAYERS && gPlayerInfo[ev->a].onThisMachine)
+					ShowWinLose(ev->a, 0, 0);
+			}
+			else
+			{
+				short winner = ev->a;
+				gTrackCompleted = true;
+				gTrackCompletedCoolDownTimer = TRACK_COMPLETE_COOLDOWN_TIME;
+
+				for (int pane = 0; pane < gNumLocalPlayers && pane < MAX_LOCAL_PLAYERS; pane++)
+				{
+					short slot = gLocalPlayerNums[pane];
+					if (gGameMode == GAME_MODE_CAPTUREFLAG)
+					{
+						Byte won = (gPlayerInfo[slot].team == (Byte)ev->b) ? 1 : 2;
+						ShowWinLose(slot, won, 0);
+					}
+					else if (winner < 0 || winner >= gNumTotalPlayers)
+					{
+						ShowWinLose(slot, 2, -1);
+					}
+					else if (winner == slot)
+					{
+						ShowWinLose(slot, 1, winner);
+					}
+					else
+					{
+						ShowWinLose(slot, 2, winner);
+					}
+				}
+			}
+			break;
+		}
+
+		case kNetEvent_PlayerLeft:
+		{
+			short p = ev->a;
+			if (p >= 0 && p < MAX_PLAYERS)
+			{
+				gPlayerInfo[p].isComputer = true;
+				sLobbyState.players[p].active = 0;
+			}
+			break;
+		}
+
+		default:
+			break;
+	}
+}
+
+static void HandlePeerDisconnectOnHost(ENetPeer* peer)
+{
+	if (!peer)
+		return;
+
+	Boolean removedAny = false;
+	for (int i = 0; i < MAX_PLAYERS; i++)
+	{
+		if (sClientPeers[i] != peer)
+			continue;
+
+		removedAny = true;
+		sClientPeers[i] = NULL;
+		sLobbyState.players[i].active = 0;
+		sHostHasInput[i] = false;
+		sHostPendingNewBits[i] = 0;
+
+		if (sLobbyState.matchStarted)
+		{
+			/* Convert departed remote player to AI during active race/battle */
+			gPlayerInfo[i].isComputer = true;
+			gPlayerInfo[i].controlBits = 0;
+			gPlayerInfo[i].controlBits_New = 0;
+
+			NetReliableEventMsg ev;
+			memset(&ev, 0, sizeof(ev));
+			ev.msgType = kNetMsgReliableEvent;
+			ev.kind = kNetEvent_PlayerLeft;
+			ev.a = (int8_t)i;
+			ev.b = 1;
+			BroadcastENetPacketToClients(NET_CHANNEL_RELIABLE, &ev, sizeof(ev), ENET_PACKET_FLAG_RELIABLE, -1);
+		}
+	}
+
+	if (!removedAny)
+		return;
+
+	if (!sLobbyState.matchStarted)
+	{
+		/* Compact remaining active lobby slots so humans remain contiguous 0..numRealPlayers-1 */
+		int writeIdx = 0;
+		for (int readIdx = 0; readIdx < MAX_PLAYERS; readIdx++)
+		{
+			if (!sLobbyState.players[readIdx].active)
+				continue;
+			if (writeIdx != readIdx)
+			{
+				sLobbyState.players[writeIdx] = sLobbyState.players[readIdx];
+				sClientPeers[writeIdx] = sClientPeers[readIdx];
+				memset(&sLobbyState.players[readIdx], 0, sizeof(sLobbyState.players[readIdx]));
+				sClientPeers[readIdx] = NULL;
+			}
+			writeIdx++;
+		}
+		BroadcastLobbyState();
+	}
+}
+
+static void ApplySnapshotToClientWorld(const NetHostSnapshotMsg* snap)
+{
+	gWhoIsIt = snap->whoIsIt;
+	gCapturedFlagCount[0] = snap->flagCount0;
+	gCapturedFlagCount[1] = snap->flagCount1;
+
+	int count = (snap->numPlayers <= MAX_PLAYERS) ? snap->numPlayers : MAX_PLAYERS;
+	if (count > 0)
+		gNumTotalPlayers = (short)count;
+	for (int i = 0; i < count; i++)
+	{
+		const NetPlayerSnapshot* ps = &snap->players[i];
+		PlayerInfoType* pi = &gPlayerInfo[i];
+
+		pi->tagTimer = ps->tagTimer;
+		pi->frozenTimer = ps->frozenTimer;
+		pi->nitroTimer = ps->nitroTimer;
+		pi->stickyTiresTimer = ps->stickyTiresTimer;
+		pi->superSuspensionTimer = ps->superSuspensionTimer;
+		pi->invisibilityTimer = ps->invisibilityTimer;
+		pi->flamingTimer = ps->flamingTimer;
+		pi->submarineImmobilized = ps->submarineImmobilized;
+		pi->health = (float)ps->health / 100.0f;
+		pi->powType = ps->powType;
+		pi->powQuantity = ps->powQuantity;
+		pi->lapNum = ps->lapNum;
+		pi->place = ps->place;
+		pi->steering = ps->steering;
+
+		pi->isIt         = (ps->flags & kPlayerSnapFlag_IsIt) != 0;
+		pi->isEliminated = (ps->flags & kPlayerSnapFlag_Eliminated) != 0;
+		pi->raceComplete = (ps->flags & kPlayerSnapFlag_RaceComplete) != 0;
+		pi->isComputer   = (ps->flags & kPlayerSnapFlag_IsComputer) != 0;
+		pi->onWater      = (ps->flags & kPlayerSnapFlag_OnWater) != 0;
+		pi->isPlaning    = (ps->flags & kPlayerSnapFlag_IsPlaning) != 0;
+		pi->gasPedalDown = (ps->flags & kPlayerSnapFlag_GasDown) != 0;
+		pi->braking      = (ps->flags & kPlayerSnapFlag_Braking) != 0;
+		pi->wrongWay     = (ps->flags & kPlayerSnapFlag_WrongWay) != 0;
+		pi->makingSkid   = (ps->flags & kPlayerSnapFlag_MakingSkid) != 0;
+
+		ObjNode* car = pi->objNode;
+		if (car)
+		{
+			car->Delta.x = ps->vx;
+			car->Delta.y = ps->vy;
+			car->Delta.z = ps->vz;
+			car->Speed2D = ps->speed2D;
+
+			/* Clear all CarriedFlag refs before re-linking torches below */
+			car->CapturedFlag = nil;
+
+			float dx = ps->x - car->Coord.x;
+			float dy = ps->y - car->Coord.y;
+			float dz = ps->z - car->Coord.z;
+			float distSq = dx * dx + dy * dy + dz * dz;
+			if (distSq > 700.0f * 700.0f)
+			{
+				car->Coord.x = ps->x;
+				car->Coord.y = ps->y;
+				car->Coord.z = ps->z;
+				car->Rot.x = ps->rotX;
+				car->Rot.y = ps->rotY;
+				car->Rot.z = ps->rotZ;
+				pi->coord = car->Coord;
+			}
+		}
+	}
+
+	/* Sync CTF Torches */
+	int torchCount = (snap->numTorches < gNumTorches) ? snap->numTorches : gNumTorches;
+	for (int t = 0; t < torchCount; t++)
+	{
+		ObjNode* torch = gTorchObjs[t];
+		if (!torch)
+			continue;
+		const NetTorchSnapshot* ts = &snap->torches[t];
+		torch->Mode = (signed char)ts->mode;
+		torch->PlayerNum = ts->playerNum;
+		if (ts->mode == 1 && ts->playerNum >= 0 && ts->playerNum < MAX_PLAYERS && gPlayerInfo[ts->playerNum].objNode)
+		{
+			gPlayerInfo[ts->playerNum].objNode->CapturedFlag = (Ptr)torch;
+		}
+		else
+		{
+			torch->Coord.x = ts->x;
+			torch->Coord.y = ts->y;
+			torch->Coord.z = ts->z;
+			UpdateObjectTransforms(torch);
+		}
+	}
+
+	/* Sync active projectile / mine / oil visuals */
+	Boolean keepTracker[NET_MAX_PROJECTILES];
+	memset(keepTracker, 0, sizeof(keepTracker));
+
+	for (int k = 0; k < snap->numProjectiles && k < NET_MAX_PROJECTILES; k++)
+	{
+		const NetProjectileSnapshot* pr = &snap->projectiles[k];
+		int foundIdx = -1;
+		for (int s = 0; s < NET_MAX_PROJECTILES; s++)
+		{
+			if (sClientWeapons[s].active && sClientWeapons[s].netId == pr->netId)
+			{
+				foundIdx = s;
+				break;
+			}
+		}
+
+		if (foundIdx < 0)
+		{
+			int freeIdx = -1;
+			for (int s = 0; s < NET_MAX_PROJECTILES; s++)
+			{
+				if (!sClientWeapons[s].active)
+				{
+					freeIdx = s;
 					break;
+				}
+			}
+			if (freeIdx >= 0)
+			{
+				NewObjectDefinitionType def;
+				memset(&def, 0, sizeof(def));
+				def.group = pr->group;
+				def.type = pr->type;
+				def.coord.x = pr->x;
+				def.coord.y = pr->y;
+				def.coord.z = pr->z;
+				def.flags = STATUS_BIT_KEEPBACKFACES | STATUS_BIT_NOLIGHTING | STATUS_BIT_NOTEXTUREWRAP;
+				def.slot = PARTICLE_SLOT;
+				def.moveCall = NULL;
+				def.scale = pr->scale > 0.0f ? pr->scale : 1.0f;
+
+				ObjNode* vis = NULL;
+				if (pr->kind == 1)
+				{
+					def.type = SKELETON_TYPE_BIRDBOMB;
+					def.animNum = 0;
+					vis = MakeNewSkeletonObject(&def);
+					if (vis && vis->Skeleton)
+						vis->Skeleton->AnimSpeed = 2.0f;
+				}
+				else
+				{
+					vis = MakeNewDisplayGroupObject(&def);
+				}
+				if (vis)
+				{
+					vis->Rot.x = pr->rotX;
+					vis->Rot.y = pr->rotY;
+					vis->Rot.z = pr->rotZ;
+					UpdateObjectTransforms(vis);
+					sClientWeapons[freeIdx].active = true;
+					sClientWeapons[freeIdx].netId = pr->netId;
+					sClientWeapons[freeIdx].kind = pr->kind;
+					sClientWeapons[freeIdx].obj = vis;
+					keepTracker[freeIdx] = true;
+				}
+			}
+		}
+		else
+		{
+			ObjNode* vis = sClientWeapons[foundIdx].obj;
+			if (vis)
+			{
+				vis->Coord.x = pr->x;
+				vis->Coord.y = pr->y;
+				vis->Coord.z = pr->z;
+				vis->Rot.x = pr->rotX;
+				vis->Rot.y = pr->rotY;
+				vis->Rot.z = pr->rotZ;
+				UpdateObjectTransforms(vis);
+			}
+			keepTracker[foundIdx] = true;
+		}
+	}
+
+	for (int s = 0; s < NET_MAX_PROJECTILES; s++)
+	{
+		if (sClientWeapons[s].active && !keepTracker[s])
+		{
+			if (sClientWeapons[s].obj && !IsObjectBeingDeleted(sClientWeapons[s].obj))
+			{
+				DeleteObject(sClientWeapons[s].obj);
+			}
+			memset(&sClientWeapons[s], 0, sizeof(sClientWeapons[s]));
+		}
+	}
+
+	if (snap->gameOver)
+	{
+		gGameOver = true;
+	}
+}
+
+static void HandlePacketOnHost(ENetPeer* peer, const uint8_t* data, size_t len)
+{
+	if (len < 1)
+		return;
+
+	uint8_t msgType = data[0];
+	switch (msgType)
+	{
+		case kNetMsgJoinRequest:
+			if (len >= sizeof(NetJoinRequestMsg))
+				HandleJoinRequest(peer, (const NetJoinRequestMsg*)data);
+			break;
+
+		case kNetMsgVehicleSelect:
+			if (len >= sizeof(NetVehicleSelectMsg))
+			{
+				const NetVehicleSelectMsg* vs = (const NetVehicleSelectMsg*)data;
+				int slot = (int)vs->playerNum;
+				if (slot >= 1 && slot < MAX_PLAYERS && sClientPeers[slot] == peer)
+				{
+					sLobbyState.players[slot].vehicleSelected = 1;
+					sLobbyState.players[slot].ready = 1;
+					sLobbyState.players[slot].sex = vs->sex;
+					sLobbyState.players[slot].vehicleType = vs->vehicleType;
+					sLobbyState.players[slot].skin = vs->skin;
+					sLobbyState.players[slot].team = vs->team;
+
+					gPlayerInfo[slot].sex = vs->sex;
+					gPlayerInfo[slot].vehicleType = vs->vehicleType;
+					gPlayerInfo[slot].skin = vs->skin;
+					gPlayerInfo[slot].team = vs->team;
+
+					BroadcastLobbyState();
+				}
+			}
+			break;
+
+		case kNetMsgLevelPrepared:
+		{
+			for (int i = 0; i < MAX_PLAYERS; i++)
+			{
+				if (sClientPeers[i] == peer)
+					sClientLevelPreparedSent[i] = true;
+			}
+			break;
+		}
+
+		case kNetMsgClientInput:
+			if (len >= sizeof(NetClientInputMsg))
+			{
+				const NetClientInputMsg* in = (const NetClientInputMsg*)data;
+				int slot = (int)in->playerNum;
+				if (slot >= 1 && slot < MAX_PLAYERS && sClientPeers[slot] == peer)
+				{
+					if (!sHostHasInput[slot] || (int32_t)(in->seq - sHostInputSeq[slot]) > 0)
+					{
+						sHostInputSeq[slot] = in->seq;
+						sHostLatestInput[slot] = *in;
+						sHostHasInput[slot] = true;
+					}
+					/* Accumulate edge-triggered bits so quick taps aren't lost between ticks */
+					sHostPendingNewBits[slot] |= in->controlBitsNew;
+				}
+			}
+			break;
+
+		case kNetMsgPlayerLeave:
+		{
+			HandlePeerDisconnectOnHost(peer);
+			break;
+		}
+
+		default:
+			break;
+	}
+}
+
+static void HandlePacketOnClient(const uint8_t* data, size_t len)
+{
+	if (len < 1)
+		return;
+
+	uint8_t msgType = data[0];
+	switch (msgType)
+	{
+		case kNetMsgJoinAck:
+			if (len >= sizeof(NetJoinAckMsg))
+			{
+				const NetJoinAckMsg* ack = (const NetJoinAckMsg*)data;
+				if (ack->accepted)
+				{
+					sMyMachineId = ack->clientMachineId;
+					int count = (int)ack->assignedCount;
+					if (count < 1) count = 1;
+					if (count > MAX_LOCAL_PLAYERS) count = MAX_LOCAL_PLAYERS;
+					gNumLocalPlayers = (short)count;
+					for (int k = 0; k < count; k++)
+					{
+						gLocalPlayerNums[k] = (short)ack->assignedSlots[k];
+					}
+					gMyNetworkPlayerNum = gLocalPlayerNums[0];
+					sConnState = kNetConn_Connected;
+					if (count == 1)
+					{
+						SDL_snprintf(sStatusText, sizeof(sStatusText), "CONNECTED AS PLAYER %d",
+						             (int)ack->assignedSlots[0] + 1);
+					}
+					else
+					{
+						SDL_snprintf(sStatusText, sizeof(sStatusText), "CONNECTED AS P%d-P%d",
+						             (int)ack->assignedSlots[0] + 1,
+						             (int)ack->assignedSlots[count - 1] + 1);
+					}
+				}
+				else
+				{
+					sConnState = kNetConn_Failed;
+					if (ack->rejectReason == 1)
+						SafeCopyStr(sStatusText, sizeof(sStatusText), "LAN CONNECTIONS ONLY");
+					else if (ack->rejectReason == 3)
+						SafeCopyStr(sStatusText, sizeof(sStatusText), "GAME IS FULL");
+					else
+						SafeCopyStr(sStatusText, sizeof(sStatusText), "JOIN REJECTED");
+				}
+			}
+			break;
+
+		case kNetMsgLobbyState:
+			if (len >= sizeof(NetLobbyStateMsg))
+			{
+				memcpy(&sLobbyState, data, sizeof(NetLobbyStateMsg));
+				ApplyLobbyStateToGlobals();
+			}
+			break;
+
+		case kNetMsgStartMatch:
+			if (len >= sizeof(NetStartMatchMsg))
+			{
+				const NetStartMatchMsg* sm = (const NetStartMatchMsg*)data;
+				sPendingSeed = sm->randomSeed;
+				sClientMatchStarted = true;
+			}
+			break;
+
+		case kNetMsgMatchGo:
+			if (len >= sizeof(NetMatchGoMsg))
+			{
+				const NetMatchGoMsg* go = (const NetMatchGoMsg*)data;
+				sPendingSeed = go->randomSeed;
+				sPendingWhoIsIt = go->whoIsIt;
+				gNumTotalPlayers = go->numPlayers;
+				sClientLevelGo = true;
+			}
+			break;
+
+		case kNetMsgHostSnapshot:
+			if (len >= sizeof(NetHostSnapshotMsg))
+			{
+				const NetHostSnapshotMsg* snap = (const NetHostSnapshotMsg*)data;
+				if (!sHasSnapshot || (int32_t)(snap->seq - sLastRecvSnapSeq) > 0)
+				{
+					sLastRecvSnapSeq = snap->seq;
+					sCurrSnap = *snap;
+					sHasSnapshot = true;
+					ApplySnapshotToClientWorld(&sCurrSnap);
+				}
+			}
+			break;
+
+		case kNetMsgReliableEvent:
+			if (len >= sizeof(NetReliableEventMsg))
+			{
+				HandleReliableEventOnClient((const NetReliableEventMsg*)data);
+			}
+			break;
+
+		case kNetMsgPlayerLeave:
+			if (len >= sizeof(NetPlayerLeaveMsg))
+			{
+				const NetPlayerLeaveMsg* pl = (const NetPlayerLeaveMsg*)data;
+				if (pl->playerNum == 0)
+				{
+					sMatchLost = true;
+					gGameOver = true;
+					sConnState = kNetConn_Disconnected;
+					SafeCopyStr(sStatusText, sizeof(sStatusText), "HOST DISCONNECTED");
+				}
+			}
+			break;
+
+		default:
+			break;
+	}
+}
+
+/**********************/
+/*   PUBLIC APIs      */
+/**********************/
+
+void InitNetworkManager(void)
+{
+	if (!sENetInitialized)
+	{
+		if (enet_initialize() != 0)
+		{
+			SDL_Log("InitNetworkManager: enet_initialize failed");
+			return;
+		}
+		sENetInitialized = true;
+	}
+
+	gIsNetworkHost = false;
+	gIsNetworkClient = false;
+	gNetGameInProgress = false;
+	sConnState = kNetConn_Idle;
+	sStatusText[0] = '\0';
+	memset(sClientPeers, 0, sizeof(sClientPeers));
+	memset(&sLobbyState, 0, sizeof(sLobbyState));
+	Net_ResetGameSyncState();
+	SyncPlayerNamesFromLobby();
+}
+
+void EndNetworkGame(void)
+{
+	Net_DisconnectGracefully();
+	ShutdownNetworkManager();
+}
+
+void DeinitNetworkManager(void)
+{
+	ShutdownNetworkManager();
+	if (sENetInitialized)
+	{
+		enet_deinitialize();
+		sENetInitialized = false;
+	}
+}
+
+void Net_SetPorts(uint16_t gamePort, uint16_t discoveryPort)
+{
+	if (gamePort != 0)
+		sGamePort = gamePort;
+	if (discoveryPort != 0)
+		sDiscoveryPort = discoveryPort;
+}
+
+void Net_GetPorts(uint16_t* outGamePort, uint16_t* outDiscoveryPort)
+{
+	if (outGamePort)
+		*outGamePort = sGamePort;
+	if (outDiscoveryPort)
+		*outDiscoveryPort = sDiscoveryPort;
+}
+
+void Net_ResetGameSyncState(void)
+{
+	sSendInputSeq = 0;
+	sLastSentInputMs = 0;
+	memset(sClientOutNewAccum, 0, sizeof(sClientOutNewAccum));
+
+	sSendSnapSeq = 0;
+	sLastSentSnapMs = 0;
+	sLastRecvSnapSeq = 0;
+	sHasSnapshot = false;
+	memset(&sCurrSnap, 0, sizeof(sCurrSnap));
+
+	memset(sHostInputSeq, 0, sizeof(sHostInputSeq));
+	memset(sHostLatestInput, 0, sizeof(sHostLatestInput));
+	memset(sHostPendingNewBits, 0, sizeof(sHostPendingNewBits));
+	memset(sHostHasInput, 0, sizeof(sHostHasInput));
+	memset(sClientLevelPreparedSent, 0, sizeof(sClientLevelPreparedSent));
+
+	memset(sHostWeapons, 0, sizeof(sHostWeapons));
+	sNextWeaponNetId = 1;
+	memset(sClientWeapons, 0, sizeof(sClientWeapons));
+	sMatchLost = false;
+}
+
+void ShutdownNetworkManager(void)
+{
+	Net_StopClientDiscovery();
+
+	if (sHostDiscoverySock != NET_INVALID_SOCKET)
+	{
+		NetCloseSocket(sHostDiscoverySock);
+		sHostDiscoverySock = NET_INVALID_SOCKET;
+	}
+
+	if (sServerPeer)
+	{
+		enet_peer_disconnect(sServerPeer, 0);
+		if (sHost)
+			enet_host_flush(sHost);
+		sServerPeer = NULL;
+	}
+
+	for (int i = 0; i < MAX_PLAYERS; i++)
+	{
+		if (sClientPeers[i])
+		{
+			ENetPeer* peer = sClientPeers[i];
+			enet_peer_disconnect(peer, 0);
+			for (int j = i; j < MAX_PLAYERS; j++)
+			{
+				if (sClientPeers[j] == peer)
+					sClientPeers[j] = NULL;
+			}
+		}
+	}
+
+	if (sHost)
+	{
+		enet_host_flush(sHost);
+		enet_host_destroy(sHost);
+		sHost = NULL;
+	}
+
+	gNetGameInProgress = false;
+	gIsNetworkHost = false;
+	gIsNetworkClient = false;
+	gMyNetworkPlayerNum = 0;
+	for (int k = 0; k < MAX_LOCAL_PLAYERS; k++)
+		gLocalPlayerNums[k] = (short)k;
+	sMyMachineId = 0;
+	sNextMachineId = 2;
+	sClientMatchStarted = false;
+	sClientLevelGo = false;
+	sConnState = kNetConn_Idle;
+	sStatusText[0] = '\0';
+	memset(&sLobbyState, 0, sizeof(sLobbyState));
+	Net_ResetGameSyncState();
+}
+
+Boolean Net_StartHostLobby(const char* hostName)
+{
+	short savedLocalPlayers = gNumLocalPlayers;
+	if (savedLocalPlayers < 1)
+		savedLocalPlayers = 1;
+	if (savedLocalPlayers > MAX_LOCAL_PLAYERS)
+		savedLocalPlayers = MAX_LOCAL_PLAYERS;
+
+	ShutdownNetworkManager();
+	InitNetworkManager();
+
+	gNumLocalPlayers = savedLocalPlayers;
+
+	if (!sENetInitialized)
+		return false;
+
+	ENetAddress address;
+	address.host = ENET_HOST_ANY;
+	address.port = sGamePort;
+
+	sHost = enet_host_create(&address, MAX_PLAYERS - 1, NET_NUM_CHANNELS, 0, 0);
+	if (!sHost)
+	{
+		SDL_snprintf(sStatusText, sizeof(sStatusText), "PORT %u IN USE", (unsigned)sGamePort);
+		sConnState = kNetConn_Failed;
+		return false;
+	}
+
+	/* Bind UDP discovery listener socket on sDiscoveryPort */
+	sHostDiscoverySock = socket(AF_INET, SOCK_DGRAM, 0);
+	if (sHostDiscoverySock != NET_INVALID_SOCKET)
+	{
+		SetSocketNonBlockingAndBroadcast(sHostDiscoverySock, true);
+		struct sockaddr_in discAddr;
+		memset(&discAddr, 0, sizeof(discAddr));
+		discAddr.sin_family = AF_INET;
+		discAddr.sin_port = htons(sDiscoveryPort);
+		discAddr.sin_addr.s_addr = htonl(INADDR_ANY);
+		if (bind(sHostDiscoverySock, (struct sockaddr*)&discAddr, sizeof(discAddr)) != 0)
+		{
+			NetCloseSocket(sHostDiscoverySock);
+			sHostDiscoverySock = NET_INVALID_SOCKET;
+		}
+	}
+
+	gIsNetworkHost = true;
+	gIsNetworkClient = false;
+	gNetGameInProgress = true;
+	gMyNetworkPlayerNum = 0;
+	sMyMachineId = 1;
+	sNextMachineId = 2;
+	sConnState = kNetConn_Hosting;
+
+	memset(&sLobbyState, 0, sizeof(sLobbyState));
+	sLobbyState.msgType = kNetMsgLobbyState;
+	sLobbyState.gameMode = (uint8_t)gGameMode;
+	sLobbyState.age = (uint8_t)gTheAge;
+	sLobbyState.trackNum = (uint8_t)gTrackNum;
+	sLobbyState.difficulty = (uint8_t)gGamePrefs.difficulty;
+	sLobbyState.multiplayerCPUs = gMultiplayerCPUs ? 1 : 0;
+	sLobbyState.tagDuration = (uint8_t)gGamePrefs.tagDuration;
+	sLobbyState.numRealPlayers = (uint8_t)savedLocalPlayers;
+
+	const char* baseName = (hostName && hostName[0]) ? hostName : "HOST";
+	for (int pane = 0; pane < savedLocalPlayers; pane++)
+	{
+		gLocalPlayerNums[pane] = (short)pane;
+		sLobbyState.players[pane].active = 1;
+		sLobbyState.players[pane].ready = 1;
+		sLobbyState.players[pane].team = (uint8_t)(pane & 1);
+		sLobbyState.players[pane].machineId = sMyMachineId;
+		if (pane == 0)
+		{
+			SafeCopyStr(sLobbyState.players[pane].name, sizeof(sLobbyState.players[pane].name), baseName);
+		}
+		else
+		{
+			SDL_snprintf(sLobbyState.players[pane].name, sizeof(sLobbyState.players[pane].name),
+			             "%.*s P%d", 24, baseName, pane + 1);
+		}
+	}
+
+	gNumRealPlayers = savedLocalPlayers;
+	SyncPlayerNamesFromLobby();
+
+	char localIP[32];
+	Net_GetLocalIPString(localIP, sizeof(localIP));
+	SDL_snprintf(sStatusText, sizeof(sStatusText), "HOSTING AT %s:%u", localIP, (unsigned)sGamePort);
+	return true;
+}
+
+uint16_t Net_GetMyMachineId(void)
+{
+	return sMyMachineId;
+}
+
+void Net_SyncHostLobbySettings(void)
+{
+	if (gIsNetworkHost && sHost)
+	{
+		BroadcastLobbyState();
+	}
+}
+
+Boolean Net_HostLaunchMatch(void)
+{
+	if (!gIsNetworkHost || !sHost)
+		return false;
+
+	sLobbyState.matchStarted = 1;
+	BroadcastLobbyState();
+
+	NetStartMatchMsg sm;
+	sm.msgType = kNetMsgStartMatch;
+	sm.randomSeed = (uint32_t)MyRandomLong();
+	if (sm.randomSeed == 0)
+		sm.randomSeed = 12345u;
+	sPendingSeed = sm.randomSeed;
+	SetMyRandomSeed(sm.randomSeed);
+
+	BroadcastENetPacketToClients(NET_CHANNEL_RELIABLE, &sm, sizeof(sm), ENET_PACKET_FLAG_RELIABLE, -1);
+	enet_host_flush(sHost);
+	return true;
+}
+
+int Net_GetConnectedPlayerCount(void)
+{
+	int count = 0;
+	for (int i = 0; i < MAX_PLAYERS; i++)
+	{
+		if (sLobbyState.players[i].active)
+			count++;
+	}
+	return count;
+}
+
+const NetLobbyStateMsg* Net_GetLobbyState(void)
+{
+	return &sLobbyState;
+}
+
+NetLobbyConnectionState Net_GetConnectionState(const char** outStatusText)
+{
+	if (outStatusText)
+		*outStatusText = sStatusText;
+	return sConnState;
+}
+
+Boolean Net_StartClientDiscovery(void)
+{
+	Net_StopClientDiscovery();
+	sNumDiscoveredHosts = 0;
+	memset(sDiscoveredHosts, 0, sizeof(sDiscoveredHosts));
+
+	sClientDiscoverySock = socket(AF_INET, SOCK_DGRAM, 0);
+	if (sClientDiscoverySock == NET_INVALID_SOCKET)
+		return false;
+
+	SetSocketNonBlockingAndBroadcast(sClientDiscoverySock, true);
+
+	/* Bind ephemeral port (0) so local test client never collides with host on sDiscoveryPort */
+	struct sockaddr_in bindAddr;
+	memset(&bindAddr, 0, sizeof(bindAddr));
+	bindAddr.sin_family = AF_INET;
+	bindAddr.sin_port = 0;
+	bindAddr.sin_addr.s_addr = htonl(INADDR_ANY);
+	if (bind(sClientDiscoverySock, (struct sockaddr*)&bindAddr, sizeof(bindAddr)) != 0)
+	{
+		NetCloseSocket(sClientDiscoverySock);
+		sClientDiscoverySock = NET_INVALID_SOCKET;
+		return false;
+	}
+
+	sLastProbeMs = 0;
+	Net_PollDiscovery();
+	return true;
+}
+
+void Net_StopClientDiscovery(void)
+{
+	if (sClientDiscoverySock != NET_INVALID_SOCKET)
+	{
+		NetCloseSocket(sClientDiscoverySock);
+		sClientDiscoverySock = NET_INVALID_SOCKET;
+	}
+}
+
+void Net_PollDiscovery(void)
+{
+	if (sClientDiscoverySock == NET_INVALID_SOCKET)
+		return;
+
+	uint32_t now = NetNowMs();
+	if ((now - sLastProbeMs) >= DISCOVERY_INTERVAL_MS)
+	{
+		sLastProbeMs = now;
+		NetDiscoveryProbePacket probe;
+		probe.magic = NET_MAGIC;
+		probe.version = NET_PROTOCOL_VERSION;
+		probe.reserved = 0;
+
+		struct sockaddr_in dest;
+		memset(&dest, 0, sizeof(dest));
+		dest.sin_family = AF_INET;
+		dest.sin_port = htons(sDiscoveryPort);
+		dest.sin_addr.s_addr = htonl(INADDR_BROADCAST);
+		sendto(sClientDiscoverySock, (const char*)&probe, sizeof(probe), 0, (struct sockaddr*)&dest, sizeof(dest));
+
+		/* Also probe loopback directly so 2 instances on the same machine find each other */
+		dest.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+		sendto(sClientDiscoverySock, (const char*)&probe, sizeof(probe), 0, (struct sockaddr*)&dest, sizeof(dest));
+	}
+
+	for (;;)
+	{
+		NetDiscoveryBeaconPacket beacon;
+		struct sockaddr_in fromAddr;
+		socklen_t fromLen = sizeof(fromAddr);
+		int n = (int)recvfrom(sClientDiscoverySock, (char*)&beacon, sizeof(beacon), 0,
+		                      (struct sockaddr*)&fromAddr, &fromLen);
+		if (n <= 0)
+			break;
+
+		if (n == (int)sizeof(beacon))
+		{
+			uint32_t ipHostOrder = ntohl(fromAddr.sin_addr.s_addr);
+			UpsertDiscoveredHost(ipHostOrder, &beacon);
+		}
+	}
+
+	/* Prune expired entries */
+	int writeIdx = 0;
+	for (int i = 0; i < sNumDiscoveredHosts; i++)
+	{
+		if ((now - sDiscoveredHosts[i].lastSeenMs) <= DISCOVERY_PRUNE_MS)
+		{
+			if (writeIdx != i)
+				sDiscoveredHosts[writeIdx] = sDiscoveredHosts[i];
+			writeIdx++;
+		}
+	}
+	sNumDiscoveredHosts = writeIdx;
+}
+
+int Net_GetDiscoveredHosts(NetDiscoveredHostInfo* outHosts, int maxOut)
+{
+	int count = (sNumDiscoveredHosts < maxOut) ? sNumDiscoveredHosts : maxOut;
+	if (outHosts && count > 0)
+		memcpy(outHosts, sDiscoveredHosts, (size_t)count * sizeof(NetDiscoveredHostInfo));
+	return count;
+}
+
+static char sPendingClientName[NET_MAX_NAME_LEN] = "PLAYER";
+
+Boolean Net_ConnectToHost(const char* ipString, uint16_t port, const char* playerName)
+{
+	ShutdownNetworkManager();
+	InitNetworkManager();
+
+	if (!sENetInitialized)
+		return false;
+
+	uint32_t hostOrderIP = 0;
+	if (!Net_ParseLANIPString(ipString, &hostOrderIP))
+	{
+		sConnState = kNetConn_Failed;
+		SafeCopyStr(sStatusText, sizeof(sStatusText), "LAN IP ADDRESSES ONLY");
+		return false;
+	}
+
+	sHost = enet_host_create(NULL, 1, NET_NUM_CHANNELS, 0, 0);
+	if (!sHost)
+	{
+		sConnState = kNetConn_Failed;
+		SafeCopyStr(sStatusText, sizeof(sStatusText), "FAILED TO CREATE CLIENT");
+		return false;
+	}
+
+	ENetAddress address;
+	address.host = htonl(hostOrderIP);
+	address.port = (port != 0) ? port : sGamePort;
+
+	sServerPeer = enet_host_connect(sHost, &address, NET_NUM_CHANNELS, 0);
+	if (!sServerPeer)
+	{
+		enet_host_destroy(sHost);
+		sHost = NULL;
+		sConnState = kNetConn_Failed;
+		SafeCopyStr(sStatusText, sizeof(sStatusText), "CONNECT FAILED");
+		return false;
+	}
+
+	SafeCopyStr(sPendingClientName, sizeof(sPendingClientName),
+	            (playerName && playerName[0]) ? playerName : "PLAYER");
+
+	gIsNetworkHost = false;
+	gIsNetworkClient = true;
+	gNetGameInProgress = true;
+	sClientMatchStarted = false;
+	sClientLevelGo = false;
+	sConnState = kNetConn_Connecting;
+	SDL_snprintf(sStatusText, sizeof(sStatusText), "CONNECTING TO %s...", ipString);
+	return true;
+}
+
+void Net_PollLobby(void)
+{
+	if (gIsNetworkHost)
+		PollHostDiscoverySocket();
+
+	if (!sHost)
+		return;
+
+	ENetEvent event;
+	while (enet_host_service(sHost, &event, 0) > 0)
+	{
+		switch (event.type)
+		{
+			case ENET_EVENT_TYPE_CONNECT:
+				if (gIsNetworkHost)
+				{
+					uint32_t ip = ntohl(event.peer->address.host);
+					if (!Net_IsLANAddress(ip))
+					{
+						enet_peer_disconnect_now(event.peer, 0);
+					}
+					/* Client will send kNetMsgJoinRequest */
+				}
+				else if (gIsNetworkClient)
+				{
+					int localCount = gNumLocalPlayers;
+					if (localCount < 1) localCount = 1;
+					if (localCount > MAX_LOCAL_PLAYERS) localCount = MAX_LOCAL_PLAYERS;
+
+					NetJoinRequestMsg req;
+					memset(&req, 0, sizeof(req));
+					req.msgType = kNetMsgJoinRequest;
+					req.version = NET_PROTOCOL_VERSION;
+					req.numLocalPlayers = (uint8_t)localCount;
+					SafeCopyStr(req.playerName, sizeof(req.playerName), sPendingClientName);
+					SendENetPacket(sServerPeer, NET_CHANNEL_RELIABLE, &req, sizeof(req), ENET_PACKET_FLAG_RELIABLE);
+				}
+				break;
+
+			case ENET_EVENT_TYPE_RECEIVE:
+				if (gIsNetworkHost)
+					HandlePacketOnHost(event.peer, event.packet->data, event.packet->dataLength);
+				else if (gIsNetworkClient)
+					HandlePacketOnClient(event.packet->data, event.packet->dataLength);
+				enet_packet_destroy(event.packet);
+				break;
+
+			case ENET_EVENT_TYPE_DISCONNECT:
+				if (gIsNetworkHost)
+				{
+					HandlePeerDisconnectOnHost(event.peer);
+				}
+				else if (gIsNetworkClient && event.peer == sServerPeer)
+				{
+					sServerPeer = NULL;
+					sConnState = kNetConn_Disconnected;
+					SafeCopyStr(sStatusText, sizeof(sStatusText), "DISCONNECTED FROM HOST");
+					if (sLobbyState.matchStarted)
+					{
+						sMatchLost = true;
+						gGameOver = true;
+					}
+				}
+				break;
 
 			default:
-					HandleOtherNetMessage(message);
-
-		}
-		NSpMessage_Release(gNetGame, message);										// dispose of message
-	}
-
-got_config:
-
-			/* HANDLE DIALOG EVENTS */
-
-	switch (event->what)
-	{
-		case keyDown:
-			switch (event->message & charCodeMask)
-			{
-				case 	0x03:  					// Enter
-				case 	0x0D: 					// Return
-						*item = 1;
-						handled = true;
-						break;
-
-				case 	0x1B:  					// Escape
-						*item = 1;
-						handled = true;
-						break;
-
-				case 	'.':  					// Command-period
-						if (event->modifiers & cmdKey)
-						{
-							*item = 1;
-							handled = true;
-						}
-						break;
-			}
-	}
-
-			/* KEEP MUSIC PLAYING */
-
-	if (gSongPlayingFlag)
-		MoviesTask(gSongMovie, 0);
-
-
-	return(handled);
-#endif
-}
-#endif
-
-
-
-
-/************************* HANDLE GAME CONFIGURATION MESSAGE *****************************/
-//
-// Called while polling in Client_WaitForGameConfigInfoDialogCallback.
-//
-
-static void HandleGameConfigMessage(NetConfigMessageType *inMessage)
-{
-	IMPLEMENT_ME_SOFT();
-#if 0
-	gGameMode 			= inMessage->gameMode;
-	gTheAge 			= inMessage->age;
-	gTrackNum 			= inMessage->trackNum;
-	gNumRealPlayers 	= inMessage->numPlayers;
-	gMyNetworkPlayerNum = inMessage->playerNum;
-	gGamePrefs.difficulty = inMessage->difficulty;
-	gGamePrefs.tagDuration = inMessage->tagDuration;
-
-	if ((inMessage->numAgesCompleted & AGE_MASK_AGE) > GetNumAgesCompleted())	// if better than our current game, then pseudo-logout that saved game
-		gSavedPlayerIsLoaded = false;
-	gPlayerSaveData.numAgesCompleted = inMessage->numAgesCompleted;
-#endif
-}
-
-#endif
-
-#pragma mark -
-
-
-/********************* HOST WAIT FOR PLAYERS TO PREPARE LEVEL *******************************/
-//
-// Called right beofre PlayArea().  This waits for the sync message from the other client players
-// indicating that they are ready to start playing.
-//
-
-void HostWaitForPlayersToPrepareLevel(void)
-{
-	IMPLEMENT_ME_SOFT();
-#if 0
-OSStatus				status;
-NetSyncMessageType		outMess;
-NSpMessageHeader 		*inMess;
-Boolean 				sync = false;
-short					n = 1;					// start @ 1 because the host (us) is already ready
-
-int						startTick = TickCount();
-
-		/********************************/
-		/* WAIT FOR ALL CLIENTS TO SYNC */
-		/********************************/
-
-	while(!sync)
-	{
-		inMess = NSpMessage_Get(gNetGame);					// get message
-		if (inMess)
-		{
-			switch(inMess->what)
-			{
-				case	kNetSyncMessage:
-						n++;								// we got another player
-						if (n == gNumRealPlayers)				// see if that's all of them
-							sync = true;
-						break;
-
-				case	kNSpError:
-						DoFatalAlert("HostWaitForPlayersToPrepareLevel: message == kNSpError");
-						break;
-
-				default:
-						HandleOtherNetMessage(inMess);
-			}
-			NSpMessage_Release(gNetGame, inMess);			// dispose of message
-		}
-
-		if (gSongPlayingFlag)												// keep music playing
-			MoviesTask(gSongMovie, 0);
-
-		if ((TickCount() - startTick) > (60 * 60 * 2))			// if no response for 2 minutes, then time out
-		{
-			DoFatalAlert("No Response from other player(s), something has gone wrong.");
+				break;
 		}
 	}
-
-
-
-		/*******************************/
-		/* TELL ALL CIENTS WE'RE READY */
-		/*******************************/
-
-	NSpClearMessageHeader(&outMess.h);
-	outMess.h.to 			= kNSpAllPlayers;						// send to all clients
-	outMess.h.what 			= kNetSyncMessage;						// set message type
-	outMess.h.messageLen 	= sizeof(outMess);						// set size of message
-	outMess.playerNum 		= 0;									// (not used this time)
-	status = NSpMessage_Send(gNetGame, &outMess.h, kNSpSendFlag_Registered);	// send message
-	if (status)
-		DoFatalAlert("HostWaitForPlayersToPrepareLevel: NSpMessage_Send failed!");
-#endif
 }
 
-
-
-/********************* CLIENT TELL HOST LEVEL IS PREPARED *******************************/
-//
-// Called right beofre PlayArea().  This waits for the sync message from the other client players
-// indicating that they are ready to start playing.
-//
-
-void ClientTellHostLevelIsPrepared(void)
+Boolean Net_ClientHasMatchStarted(void)
 {
-	IMPLEMENT_ME_SOFT();
-#if 0
-OSStatus				status;
-NetSyncMessageType		outMess;
-Boolean 				sync = false;
-NSpMessageHeader 		*inMess;
+	return sClientMatchStarted;
+}
 
-		/***********************************/
-		/* TELL THE HOST THAT WE ARE READY */
-		/***********************************/
+void Net_DisconnectGracefully(void)
+{
+	if (!gNetGameInProgress || !sHost)
+		return;
 
-	NSpClearMessageHeader(&outMess.h);
-	outMess.h.to 			= kNSpHostOnly;										// send to this host
-	outMess.h.what 			= kNetSyncMessage;									// set message type
-	outMess.h.messageLen 	= sizeof(outMess);									// set size of message
-	outMess.playerNum 		= gMyNetworkPlayerNum;										// set player num
-	status = NSpMessage_Send(gNetGame, &outMess.h, kNSpSendFlag_Registered);	// send message
-	if (status)
-		DoFatalAlert("ClientTellHostLevelIsPrepared: NSpMessage_Send failed!");
+	NetPlayerLeaveMsg pl;
+	pl.msgType = kNetMsgPlayerLeave;
+	pl.playerNum = (uint8_t)gMyNetworkPlayerNum;
 
-
-		/**************************/
-		/* WAIT FOR HOST TO REPLY */
-		/**************************/
-
-	while(!sync)
+	if (gIsNetworkClient && sServerPeer)
 	{
-		inMess = NSpMessage_Get(gNetGame);											// get message
-		if (inMess)
-		{
-			switch(inMess->what)
-			{
-				case	kNetSyncMessage:
-						sync = true;
-						break;
-
-				case	kNSpError:
-						DoFatalAlert("HostWaitForPlayersToPrepareLevel: message == kNSpError");
-						break;
-
-				default:
-						HandleOtherNetMessage(inMess);
-			}
-			NSpMessage_Release(gNetGame, inMess);									// dispose of message
-		}
-
-		if (gSongPlayingFlag)												// keep music playing
-			MoviesTask(gSongMovie, 0);
-
+		SendENetPacket(sServerPeer, NET_CHANNEL_RELIABLE, &pl, sizeof(pl), ENET_PACKET_FLAG_RELIABLE);
+		enet_host_flush(sHost);
 	}
-#endif
-}
-
-
-#pragma mark -
-
-
-/************** SEND HOST CONTROL INFO TO CLIENTS *********************/
-//
-// The host sends this at the beginning of each frame to all of the network clients.
-// This data contains the gFramesPerSecond/Frac info plus the key controls state bitfields for each player.
-//
-
-void HostSend_ControlInfoToClients(void)
-{
-	IMPLEMENT_ME_SOFT();
-#if 0
-
-OSStatus						status;
-short							i;
-
-
-				/* BUILD MESSAGE */
-
-	NSpClearMessageHeader(&gHostOutMess.h);
-
-	gHostOutMess.h.to 			= kNSpAllPlayers;						// send to all clients
-	gHostOutMess.h.what 		= kNetHostControlInfoMessage;			// set message type
-	gHostOutMess.h.messageLen 	= sizeof(gHostOutMess);						// set size of message
-
-	gHostOutMess.frameCounter	= gHostSendCounter++;					// send the frame counter & inc
-	gHostOutMess.fps 			= gFramesPerSecond;						// fps
-	gHostOutMess.fpsFrac		= gFramesPerSecondFrac;					// fps frac
-	gHostOutMess.randomSeed		= MyRandomLong();						// send the host's current random value for sync verification
-
-	for (i = 0; i < MAX_PLAYERS; i++)								// control bits
+	else if (gIsNetworkHost)
 	{
-		gHostOutMess.controlBits[i] = gPlayerInfo[i].controlBits;
-		gHostOutMess.controlBitsNew[i] = gPlayerInfo[i].controlBits_New;
-		gHostOutMess.analogSteering[i] = gPlayerInfo[i].analogSteering;
+		BroadcastENetPacketToClients(NET_CHANNEL_RELIABLE, &pl, sizeof(pl), ENET_PACKET_FLAG_RELIABLE, -1);
+		enet_host_flush(sHost);
 	}
-
-			/* SEND IT */
-
-	status = NSpMessage_Send(gNetGame, &gHostOutMess.h, kNSpSendFlag_Registered);
-	if (status)
-		DoFatalAlert("HostSend_ControlInfoToClients: NSpMessage_Send failed!");
-#endif
 }
 
-
-/************** GET NETWORK CONTROL INFO FROM HOST *********************/
-//
-// The client reads this from the host at the beginning of each frame.
-// This data will contain the fps and control bitfield info for each player.
-//
-
-void ClientReceive_ControlInfoFromHost(void)
+Boolean Net_CheckMatchLost(void)
 {
-	IMPLEMENT_ME_SOFT();
-#if 0
-
-NetHostControlInfoMessageType		*mess;
-NSpMessageHeader 					*inMess;
-uint32_t								tick,i;
-Boolean								gotIt = false;
-
-
-	tick = TickCount();														// init tick for timeout
-
-	do
-	{
-		inMess = NSpMessage_Get(gNetGame);									// get message
-		if (inMess)
-		{
-			tick = TickCount();												// reset tick for timeout
-			switch(inMess->what)
-			{
-				case	kNetHostControlInfoMessage:
-						mess = (NetHostControlInfoMessageType *)inMess;
-
-						if (mess->frameCounter < gHostSendCounter)			// see if this is an old packet, possibly a duplicate.  If so, skip it
-							break;
-						if (mess->frameCounter > gHostSendCounter)			// see if we skipped a packet; one must have gotten lost
-							DoFatalAlert("ClientReceive_ControlInfoFromHost: It seems Net Sprocket has lost a packet");
-						gHostSendCounter++;									// inc host counter since the next packet we get will be +1
-
-						gFramesPerSecond 		= mess->fps;
-						gFramesPerSecondFrac 	= mess->fpsFrac;
-
-						if (MyRandomLong() != mess->randomSeed)				// verify that host's random # is in sync with ours!
-						{
-							DoFatalAlert("ClientReceive_ControlInfoFromHost: Not in sync!  Net Sprocket must have lost some data.");
-						}
-
-						for (i = 0; i < MAX_PLAYERS; i++)					// control bits
-						{
-							gPlayerInfo[i].controlBits 		= mess->controlBits[i];
-							gPlayerInfo[i].controlBits_New 	= mess->controlBitsNew[i];
-							gPlayerInfo[i].analogSteering	= mess->analogSteering[i];
-						}
-
-						gotIt = true;
-						break;
-
-				case	kNSpError:
-						DoFatalAlert("ClientReceive_ControlInfoFromHost: message == kNSpError");
-						break;
-
-				default:
-						if (HandleOtherNetMessage(inMess))
-							return;
-			}
-			NSpMessage_Release(gNetGame, inMess);			// dispose of message
-		}
-
-				/* SEE IF WE ARE NOT GETTING THE PACKET */
-				//
-				// If this happens, then it is possible that Net Sprocket lost a packet.  There is no way to know who's packet got lost
-				// so go ahead and send our most recent packet again in case it was us.  The Host will throw out any dupes that it gets.
-				//
-
-		if ((TickCount() - tick) > (DATA_TIMEOUT*60))		// see if we've been waiting longer than n seconds
-		{
-			gTimeoutCounter++;								// keep track of how often this happens
-			if (gTimeoutCounter > 3)
-				DoFatalAlert("ClientReceive_ControlInfoFromHost: the network is losing too much data, must abort.");
-
-			NSpMessage_Send(gNetGame, &gClientOutMess.h, kNSpSendFlag_Registered);	// resend the last message
-			tick = TickCount();														// reset tick
-		}
-
-	}while(!gotIt);
-
-	gTimeoutCounter = 0;
-#endif
+	return sMatchLost;
 }
 
-
-
-/************** CLIENT SEND CONTROL INFO TO HOST *********************/
-//
-// At the end of each frame, the client sends the new control state info to the host for
-// the next frame.
-//
-
-void ClientSend_ControlInfoToHost(void)
-{
-	IMPLEMENT_ME_SOFT();
-#if 0
-OSStatus						status;
-
-
-				/* BUILD MESSAGE */
-
-	NSpClearMessageHeader(&gClientOutMess.h);
-
-	gClientOutMess.h.to 			= kNSpHostOnly;							// send to Host
-	gClientOutMess.h.what 			= kNetClientControlInfoMessage;			// set message type
-	gClientOutMess.h.messageLen 	= sizeof(gClientOutMess);				// set size of message
-
-	gClientOutMess.frameCounter		= gClientSendCounter[gMyNetworkPlayerNum]++;	// send client frame counter & inc
-	gClientOutMess.playerNum		= gMyNetworkPlayerNum;
-	gClientOutMess.controlBits 		= gPlayerInfo[gMyNetworkPlayerNum].controlBits;
-	gClientOutMess.controlBitsNew  	= gPlayerInfo[gMyNetworkPlayerNum].controlBits_New;
-	gClientOutMess.analogSteering 	= gPlayerInfo[gMyNetworkPlayerNum].analogSteering;
-
-
-			/* SEND IT */
-
-	status = NSpMessage_Send(gNetGame, &gClientOutMess.h, kNSpSendFlag_Registered);
-//	if (status)
-//		DoFatalAlert("ClientSend_ControlInfoToHost: NSpMessage_Send failed!");
-#endif
-}
-
-
-/*************** HOST GET CONTROL INFO FROM CLIENTS ***********************/
-
-void HostReceive_ControlInfoFromClients(void)
-{
-	IMPLEMENT_ME_SOFT();
-#if 0
-NetClientControlInfoMessageType		*mess;
-NSpMessageHeader 					*inMess;
-uint32_t								tick;
-Boolean								gotIt = false;
-short								n,i;
-
-
-	n = 1;                                                  // start @ 1 because the host already has his own info
-	tick = TickCount();										// start tick for timeout
-
-	while(n < gNumRealPlayers)								// loop until I've got the message from all players
-	{
-		inMess = NSpMessage_Get(gNetGame);					// get message
-		if (inMess)
-		{
-			tick = TickCount();								// reset tick for timeout
-			switch(inMess->what)
-			{
-				case	kNetClientControlInfoMessage:
-						mess = (NetClientControlInfoMessageType *)inMess;
-
-						i = mess->playerNum;									// get player #
-
-						if (mess->frameCounter < gClientSendCounter[i])			// see if this is an old packet, possibly a duplicate.  If so, skip it
-							break;
-						if (mess->frameCounter > gClientSendCounter[i])			// see if we skipped a packet; one must have gotten lost
-							DoFatalAlert("HostReceive_ControlInfoFromClients: It seems Net Sprocket has lost a packet");
-						gClientSendCounter[i]++;								// inc counter since the next packet we get will be +1
-
-
-						gPlayerInfo[i].controlBits	= mess->controlBits;
-						gPlayerInfo[i].controlBits_New = mess->controlBitsNew;
-						gPlayerInfo[i].analogSteering = mess->analogSteering;
-
-						n++;
-						break;
-
-				case	kNSpError:
-						DoFatalAlert("HostReceive_ControlInfoFromClients: message == kNSpError");
-						break;
-
-				default:
-						if (HandleOtherNetMessage(inMess))
-							return;
-
-			}
-			NSpMessage_Release(gNetGame, inMess);			// dispose of message
-		}
-
-		if ((TickCount() - tick) > (DATA_TIMEOUT*60))		// see if we've been waiting longer than n seconds
-		{
-			gTimeoutCounter++;								// keep track of how often this happens
-			if (gTimeoutCounter > 3)
-				DoFatalAlert("HostReceive_ControlInfoFromClients: the network is losing too much data, must abort.");
-
-			NSpMessage_Send(gNetGame, &gHostOutMess.h, kNSpSendFlag_Registered);
-			tick = TickCount();														// reset tick
-		}
-
-	}
-#endif
-}
-
-
-#pragma mark -
-
-
-/********************* PLAYER BROADCAST VEHICLE TYPE *******************************/
-//
-// Tell all of the other net players what character type we want to be.
-//
+/**********************/
+/* VEHICLE SELECTION  */
+/**********************/
 
 void PlayerBroadcastVehicleType(void)
 {
-	IMPLEMENT_ME_SOFT();
-#if 0
-OSStatus					status;
-NetPlayerCharTypeMessage	outMess;
+	if (!gNetGameInProgress || !sHost)
+		return;
 
+	int localCount = gNumLocalPlayers;
+	if (localCount < 1) localCount = 1;
+	if (localCount > MAX_LOCAL_PLAYERS) localCount = MAX_LOCAL_PLAYERS;
 
-				/* BUILD MESSAGE */
-
-	NSpClearMessageHeader(&outMess.h);
-
-	outMess.h.to 			= kNSpAllPlayers;						// send to all clients
-	outMess.h.what 			= kNetPlayerCharTypeMessage;			// set message type
-	outMess.h.messageLen 	= sizeof(outMess);						// set size of message
-
-	outMess.playerNum		= gMyNetworkPlayerNum;					// player #
-	outMess.vehicleType		= gPlayerInfo[gMyNetworkPlayerNum].vehicleType;
-	outMess.sex				= gPlayerInfo[gMyNetworkPlayerNum].sex;
-
-			/* SEND IT */
-
-	status = NSpMessage_Send(gNetGame, &outMess.h, kNSpSendFlag_Registered);
-	if (status)
-		DoFatalAlert("PlayerBroadcastVehicleType: NSpMessage_Send failed!");
-#endif
-}
-
-/***************** GET VEHICLE SELECTION FROM NET PLAYERS ***********************/
-
-void GetVehicleSelectionFromNetPlayers(void)
-{
-	IMPLEMENT_ME_SOFT();
-#if 0
-short	playerNum, charType, count, sex;
-
-	ShowLoadingPicture();													// show something while we wait
-
-	count = 1;																// start count @ 1 since we have our own local info already
-
-	do
+	for (int pane = 0; pane < localCount; pane++)
 	{
-		if (PlayerReceiveVehicleTypeFromOthers(&playerNum, &charType, &sex))		// check for network message
+		int slot = gLocalPlayerNums[pane];
+		if (slot < 0 || slot >= MAX_PLAYERS)
+			continue;
+
+		sLobbyState.players[slot].vehicleSelected = 1;
+		sLobbyState.players[slot].ready = 1;
+		sLobbyState.players[slot].sex = (int8_t)gPlayerInfo[slot].sex;
+		sLobbyState.players[slot].vehicleType = (int8_t)gPlayerInfo[slot].vehicleType;
+		sLobbyState.players[slot].skin = (int8_t)gPlayerInfo[slot].skin;
+		sLobbyState.players[slot].team = gPlayerInfo[slot].team;
+
+		if (gIsNetworkClient && sServerPeer)
 		{
-			gPlayerInfo[playerNum].vehicleType = charType;					// save this player's type
-			gPlayerInfo[playerNum].sex = sex;								// save this player's sex
-			count++;														// inc count of received info
-		}
-
-		if (gSongPlayingFlag)												// keep music playing
-			MoviesTask(gSongMovie, 0);
-
-	}while(count < gNumRealPlayers);
-#endif
-}
-
-
-#if 0
-/*************** PLAYER RECEIVE CHARACTER TYPE FROM OTHERS ***********************/
-//
-// Receive above message from other players.
-//
-// OUTPUT: true if got a char type, playerNum/charType
-//
-
-static Boolean PlayerReceiveVehicleTypeFromOthers(short *playerNum, short *charType, short *sex)
-{
-	IMPLEMENT_ME_SOFT(); return false;
-
-NetPlayerCharTypeMessage		*mess;
-NSpMessageHeader 				*inMess;
-Boolean							gotType = false;
-
-	inMess = NSpMessage_Get(gNetGame);					// get message
-	if (inMess)
-	{
-		switch(inMess->what)
-		{
-			case	kNetPlayerCharTypeMessage:
-					mess = (NetPlayerCharTypeMessage *)inMess;
-
-					*playerNum	= mess->playerNum;					// get player #
-					*charType	= mess->vehicleType;				// get character type
-					*sex		= mess->sex;						// get character sex
-					gotType 	= true;
-					break;
-
-			case	kNSpError:
-					DoFatalAlert("PlayerReceiveVehicleTypeFromOthers: message == kNSpError");
-					break;
-
-			default:
-					HandleOtherNetMessage(inMess);
-
-		}
-		NSpMessage_Release(gNetGame, inMess);			// dispose of message
-	}
-
-	return(gotType);
-}
-
-
-/******************* HANDLE OTHER NET MESSAGE ***********************/
-//
-// Called when other message handler's get a message that they don't expect to get.
-//
-// OUTPUT: returns TRUE if game terminated
-//
-
-static Boolean HandleOtherNetMessage(NSpMessageHeader	*message)
-{
-	IMPLEMENT_ME_SOFT(); return true;
-#if 0
-
-	switch(message->what)
-	{
-
-					/* AN ERROR MESSAGE */
-
-		case	kNSpError:
-				DoFatalAlert("HandleOtherNetMessage: kNSpError");
-
-
-					/* A PLAYER UNEXPECTEDLY HAS LEFT THE GAME */
-
-		case	kNSpPlayerLeft:
-				PlayerUnexpectedlyLeavesGame((NSpPlayerLeftMessage *)message);
-				break;
-
-					/* THE HOST HAS UNEXPECTEDLY LEFT THE GAME */
-
-		case	kNSpGameTerminated:
-				DoAlert("Game Terminated: The Host has unexpectedly quit the game.");
-				EndNetworkGame();
-				gGameOver = true;
-				break;
-
-					/* NULL PACKET */
-
-		case	kNetNullPacket:
-				break;
-
-		case	kNSpJoinRequest:
-				DoFatalAlert("HandleOtherNetMessage: kNSpJoinRequest");
-
-		case	kNSpJoinApproved:
-				DoFatalAlert("HandleOtherNetMessage: kNSpJoinApproved");
-
-		case	kNSpJoinDenied:
-				DoFatalAlert("HandleOtherNetMessage: kNSpJoinDenied");
-
-		case	kNSpPlayerJoined:
-				DoFatalAlert("HandleOtherNetMessage: kNSpPlayerJoined");
-
-		case	kNSpHostChanged:
-				DoFatalAlert("HandleOtherNetMessage: kNSpHostChanged");
-
-		case	kNSpGroupCreated:
-				DoFatalAlert("HandleOtherNetMessage: kNSpGroupCreated");
-
-		case	kNSpGroupDeleted:
-				DoFatalAlert("HandleOtherNetMessage: kNSpGroupDeleted");
-
-		case	kNSpPlayerAddedToGroup:
-				DoFatalAlert("HandleOtherNetMessage: kNSpPlayerAddedToGroup");
-
-		case	kNSpPlayerRemovedFromGroup:
-				DoFatalAlert("HandleOtherNetMessage: kNSpPlayerAddedToGroup");
-
-		case	kNSpPlayerTypeChanged:
-				DoFatalAlert("HandleOtherNetMessage: kNSpPlayerAddedToGroup");
-
-		default:
-				DoFatalAlert("HandleOtherNetMessage: unknown");
-	}
-
-	return(gGameOver);
-#endif
-}
-
-
-/***************** PLAYER UNEXPECTEDLY LEAVES GAME ***********************/
-//
-// Called when HandleOtherNetMessage() gets a kNSpPlayerLeft message from one of the other players.
-//
-// INPUT: playerID = ID# of player that sent message
-//
-
-static void PlayerUnexpectedlyLeavesGame(NSpPlayerLeftMessage *mess)
-{
-	IMPLEMENT_ME_SOFT();
-#if 0
-int			i;
-NSpPlayerID	playerID = mess->playerID;
-
-		/* FIND PLAYER NUM THAT MATCHES THE ID */
-
-	for (i = 0; i < gNumTotalPlayers; i++)
-	{
-		if (!gPlayerInfo[i].isComputer)							// skip computer players
-		{
-			if (gPlayerInfo[i].nspPlayerID == playerID)			// see if ID matches
-				 goto matched_id;
+			NetVehicleSelectMsg msg;
+			msg.msgType = kNetMsgVehicleSelect;
+			msg.playerNum = (uint8_t)slot;
+			msg.sex = (int8_t)gPlayerInfo[slot].sex;
+			msg.vehicleType = (int8_t)gPlayerInfo[slot].vehicleType;
+			msg.skin = (int8_t)gPlayerInfo[slot].skin;
+			msg.team = gPlayerInfo[slot].team;
+			SendENetPacket(sServerPeer, NET_CHANNEL_RELIABLE, &msg, sizeof(msg), ENET_PACKET_FLAG_RELIABLE);
 		}
 	}
-	DoFatalAlert("PlayerUnexpectedlyLeavesGame: cannot find matching player id#");
 
-
-matched_id:
-	gPlayerInfo[i].isComputer = true;							// turn it into a computer player.
-	gPlayerInfo[i].isEliminated = true;							// also eliminate from battles
-	gNumGatheredPlayers--;										// one less net player in the game
-	gNumRealPlayers--;
-
-	if (gNumRealPlayers <= 1)									// see if nobody to play with
-		gGameOver = true;
-
-			/* HANDLE SPECIFICS */
-
-	switch(gGameMode)
+	if (gIsNetworkHost)
 	{
-		case	GAME_MODE_TAG1:
-		case	GAME_MODE_TAG2:
-				if (gPlayerInfo[i].isIt)
-					ChooseTaggedPlayer();
-				break;
+		BroadcastLobbyState();
 	}
-#endif
+	else if (gIsNetworkClient && sServerPeer)
+	{
+		enet_host_flush(sHost);
+	}
 }
-#endif
 
-#pragma mark -
-
-/********************* PLAYER BROADCAST NULL PACKET *******************************/
-//
-// Send a dummy packet to all other players to let them know we're still active, but we're
-// probably paused for some reason.  The recipients will then just wait and not time out.
-//
-
-void PlayerBroadcastNullPacket(void)
+Boolean GetVehicleSelectionFromNetPlayers(void)
 {
-	IMPLEMENT_ME_SOFT();
-#if 0
-OSStatus					status;
-NSpMessageHeader			outMess;
+	if (!gNetGameInProgress)
+		return false;
 
+	while (true)
+	{
+		DoSDLMaintenance();
+		Net_PollLobby();
 
-				/* BUILD MESSAGE */
+		if (gIsNetworkClient && (sConnState == kNetConn_Disconnected || sConnState == kNetConn_Failed || sMatchLost))
+			return true;
 
-	NSpClearMessageHeader(&outMess);
+		/* Allow backing out while waiting for slow peers */
+		if (GetNewNeedStateAnyP(kNeed_UIBack))
+		{
+			Net_DisconnectGracefully();
+			return true;
+		}
 
-	outMess.to 			= kNSpAllPlayers;						// send to all clients
-	outMess.what 		= kNetNullPacket;						// set message type
-	outMess.messageLen 	= sizeof(outMess);						// set size of message
+		Boolean allReady = true;
+		for (int i = 0; i < MAX_PLAYERS; i++)
+		{
+			if (sLobbyState.players[i].active && !sLobbyState.players[i].vehicleSelected)
+			{
+				allReady = false;
+				break;
+			}
+		}
 
+		if (allReady)
+			break;
 
-			/* SEND IT */
+		SDL_Delay(10);
+	}
 
-	status = NSpMessage_Send(gNetGame, &outMess, kNSpSendFlag_Registered);
-	if (status)
-		DoFatalAlert("PlayerBroadcastNullPacket: NSpMessage_Send failed!");
-#endif
+	ApplyLobbyStateToGlobals();
+	if (sPendingSeed != 0)
+		SetMyRandomSeed(sPendingSeed);
+	return false;
 }
 
+/**********************/
+/* LEVEL LOAD BARRIER */
+/**********************/
+
+void HostWaitForPlayersToPrepareLevel(void)
+{
+	if (!gIsNetworkHost || !sHost)
+		return;
+
+	for (int i = 0; i < MAX_PLAYERS; i++)
+	{
+		if (sLobbyState.players[i].active && sClientPeers[i] == NULL)
+			sClientLevelPreparedSent[i] = true;
+	}
+	uint32_t startMs = NetNowMs();
+
+	while (true)
+	{
+		DoSDLMaintenance();
+		Net_PollLobby();
+
+		Boolean allPrepared = true;
+		for (int i = 0; i < MAX_PLAYERS; i++)
+		{
+			if (sLobbyState.players[i].active && sClientPeers[i] && !sClientLevelPreparedSent[i])
+			{
+				allPrepared = false;
+				break;
+			}
+		}
+
+		if (allPrepared)
+			break;
+
+		/* Safety timeout (15s) so dropped silent peer doesn't wedge host forever */
+		if ((NetNowMs() - startMs) > 15000u)
+			break;
+
+		SDL_Delay(5);
+	}
+
+	NetMatchGoMsg go;
+	go.msgType = kNetMsgMatchGo;
+	go.randomSeed = sPendingSeed;
+	go.whoIsIt = (int8_t)gWhoIsIt;
+	go.numPlayers = (uint8_t)gNumTotalPlayers;
+	BroadcastENetPacketToClients(NET_CHANNEL_RELIABLE, &go, sizeof(go), ENET_PACKET_FLAG_RELIABLE, -1);
+	enet_host_flush(sHost);
+}
+
+void ClientTellHostLevelIsPrepared(void)
+{
+	if (!gIsNetworkClient || !sHost || !sServerPeer)
+		return;
+
+	NetLevelPreparedMsg msg;
+	msg.msgType = kNetMsgLevelPrepared;
+	msg.playerNum = (uint8_t)gMyNetworkPlayerNum;
+	SendENetPacket(sServerPeer, NET_CHANNEL_RELIABLE, &msg, sizeof(msg), ENET_PACKET_FLAG_RELIABLE);
+	enet_host_flush(sHost);
+
+	uint32_t startMs = NetNowMs();
+	while (!sClientLevelGo && !sMatchLost &&
+	       sConnState != kNetConn_Disconnected &&
+	       sConnState != kNetConn_Failed)
+	{
+		DoSDLMaintenance();
+		Net_PollLobby();
+
+		if ((NetNowMs() - startMs) > 15000u)
+			break;
+
+		SDL_Delay(5);
+	}
+
+	if (gGameMode == GAME_MODE_TAG1 || gGameMode == GAME_MODE_TAG2)
+	{
+		gWhoIsIt = sPendingWhoIsIt;
+	}
+}
+
+/**********************/
+/* IN-GAME LOOP HOOKS */
+/**********************/
+
+void ClientSend_ControlInfoToHost(void)
+{
+	if (!gIsNetworkClient || !sHost || !sServerPeer)
+		return;
+
+	int localCount = gNumLocalPlayers;
+	if (localCount < 1) localCount = 1;
+	if (localCount > MAX_LOCAL_PLAYERS) localCount = MAX_LOCAL_PLAYERS;
+
+	uint32_t anyNew = 0;
+	for (int pane = 0; pane < localCount; pane++)
+	{
+		int slot = gLocalPlayerNums[pane];
+		if (slot >= 0 && slot < MAX_PLAYERS)
+		{
+			sClientOutNewAccum[pane] |= gPlayerInfo[slot].controlBits_New;
+			anyNew |= sClientOutNewAccum[pane];
+		}
+	}
+
+	uint32_t now = NetNowMs();
+	if ((now - sLastSentInputMs) < INPUT_SEND_INTERVAL_MS && anyNew == 0)
+		return;
+	sLastSentInputMs = now;
+
+	uint32_t seq = ++sSendInputSeq;
+	for (int pane = 0; pane < localCount; pane++)
+	{
+		int slot = gLocalPlayerNums[pane];
+		if (slot < 0 || slot >= MAX_PLAYERS)
+			continue;
+
+		NetClientInputMsg msg;
+		msg.msgType = kNetMsgClientInput;
+		msg.playerNum = (uint8_t)slot;
+		msg.seq = seq;
+		msg.controlBits = gPlayerInfo[slot].controlBits;
+		msg.controlBitsNew = sClientOutNewAccum[pane];
+		msg.analogX = gPlayerInfo[slot].analogSteering.x;
+		msg.analogY = gPlayerInfo[slot].analogSteering.y;
+
+		sClientOutNewAccum[pane] = 0;
+		SendENetPacket(sServerPeer, NET_CHANNEL_UNRELIABLE, &msg, sizeof(msg), 0);
+	}
+	enet_host_flush(sHost);
+}
+
+void HostReceive_ControlInfoFromClients(void)
+{
+	if (!gIsNetworkHost || !sHost)
+		return;
+
+	Net_PollLobby();
+
+	for (int i = 0; i < MAX_PLAYERS; i++)
+	{
+		if (sClientPeers[i] == NULL || gPlayerInfo[i].isComputer)
+			continue;
+
+		if (sHostHasInput[i])
+		{
+			gPlayerInfo[i].controlBits = sHostLatestInput[i].controlBits;
+			gPlayerInfo[i].controlBits_New = sHostPendingNewBits[i];
+			gPlayerInfo[i].analogSteering.x = sHostLatestInput[i].analogX;
+			gPlayerInfo[i].analogSteering.y = sHostLatestInput[i].analogY;
+		}
+		else
+		{
+			gPlayerInfo[i].controlBits = 0;
+			gPlayerInfo[i].controlBits_New = 0;
+			gPlayerInfo[i].analogSteering.x = 0.0f;
+			gPlayerInfo[i].analogSteering.y = 0.0f;
+		}
+		sHostPendingNewBits[i] = 0;
+	}
+}
+
+void HostSend_ControlInfoToClients(void)
+{
+	if (!gIsNetworkHost || !sHost)
+		return;
+
+	uint32_t now = NetNowMs();
+	if ((now - sLastSentSnapMs) < SNAPSHOT_INTERVAL_MS)
+		return;
+	sLastSentSnapMs = now;
+
+	NetHostSnapshotMsg snap;
+	memset(&snap, 0, sizeof(snap));
+	snap.msgType = kNetMsgHostSnapshot;
+	snap.seq = ++sSendSnapSeq;
+	snap.whoIsIt = (int8_t)gWhoIsIt;
+	snap.numPlayers = (uint8_t)gNumTotalPlayers;
+	snap.flagCount0 = (uint8_t)gCapturedFlagCount[0];
+	snap.flagCount1 = (uint8_t)gCapturedFlagCount[1];
+	snap.gameOver = gGameOver ? 1 : 0;
+	snap.gameWinner = -1;
+
+	int count = (gNumTotalPlayers <= MAX_PLAYERS) ? gNumTotalPlayers : MAX_PLAYERS;
+	for (int i = 0; i < count; i++)
+	{
+		const PlayerInfoType* pi = &gPlayerInfo[i];
+		NetPlayerSnapshot* ps = &snap.players[i];
+		const ObjNode* car = pi->objNode;
+
+		if (car)
+		{
+			ps->x = car->Coord.x;
+			ps->y = car->Coord.y;
+			ps->z = car->Coord.z;
+			ps->rotX = car->Rot.x;
+			ps->rotY = car->Rot.y;
+			ps->rotZ = car->Rot.z;
+			ps->vx = car->Delta.x;
+			ps->vy = car->Delta.y;
+			ps->vz = car->Delta.z;
+			ps->speed2D = car->Speed2D;
+		}
+
+		ps->steering = pi->steering;
+		ps->tagTimer = pi->tagTimer;
+		ps->frozenTimer = pi->frozenTimer;
+		ps->nitroTimer = pi->nitroTimer;
+		ps->stickyTiresTimer = pi->stickyTiresTimer;
+		ps->superSuspensionTimer = pi->superSuspensionTimer;
+		ps->invisibilityTimer = pi->invisibilityTimer;
+		ps->flamingTimer = pi->flamingTimer;
+		ps->submarineImmobilized = pi->submarineImmobilized;
+
+		float hp = pi->health * 100.0f;
+		if (hp < 0.0f) hp = 0.0f;
+		if (hp > 255.0f) hp = 255.0f;
+		ps->health = (uint8_t)(hp + 0.5f);
+
+		ps->powType = (int8_t)pi->powType;
+		ps->powQuantity = (uint8_t)pi->powQuantity;
+		ps->lapNum = (uint8_t)pi->lapNum;
+		ps->place = (uint8_t)pi->place;
+		ps->cameraMode = pi->cameraMode;
+		ps->carriedTorchIdx = -1;
+
+		uint16_t flags = 0;
+		if (pi->isIt)         flags |= kPlayerSnapFlag_IsIt;
+		if (pi->isEliminated) flags |= kPlayerSnapFlag_Eliminated;
+		if (pi->raceComplete) flags |= kPlayerSnapFlag_RaceComplete;
+		if (pi->isComputer)   flags |= kPlayerSnapFlag_IsComputer;
+		if (pi->onWater)      flags |= kPlayerSnapFlag_OnWater;
+		if (pi->isPlaning)    flags |= kPlayerSnapFlag_IsPlaning;
+		if (pi->gasPedalDown) flags |= kPlayerSnapFlag_GasDown;
+		if (pi->braking)      flags |= kPlayerSnapFlag_Braking;
+		if (pi->wrongWay)     flags |= kPlayerSnapFlag_WrongWay;
+		if (pi->makingSkid)   flags |= kPlayerSnapFlag_MakingSkid;
+		ps->flags = flags;
+	}
+
+	int torchCount = (gNumTorches <= NET_MAX_TORCHES) ? gNumTorches : NET_MAX_TORCHES;
+	snap.numTorches = (uint8_t)torchCount;
+	for (int t = 0; t < torchCount; t++)
+	{
+		if (gTorchObjs[t])
+		{
+			snap.torches[t].mode = (uint8_t)gTorchObjs[t]->Mode;
+			snap.torches[t].playerNum = (int8_t)gTorchObjs[t]->PlayerNum;
+			snap.torches[t].x = gTorchObjs[t]->Coord.x;
+			snap.torches[t].y = gTorchObjs[t]->Coord.y;
+			snap.torches[t].z = gTorchObjs[t]->Coord.z;
+		}
+	}
+
+	int projCount = 0;
+	for (int w = 0; w < NET_MAX_PROJECTILES && projCount < NET_MAX_PROJECTILES; w++)
+	{
+		if (sHostWeapons[w].active && sHostWeapons[w].obj && !IsObjectBeingDeleted(sHostWeapons[w].obj))
+		{
+			const ObjNode* obj = sHostWeapons[w].obj;
+			NetProjectileSnapshot* pr = &snap.projectiles[projCount++];
+			pr->netId = sHostWeapons[w].netId;
+			pr->group = obj->Group;
+			pr->type = obj->Type;
+			pr->kind = sHostWeapons[w].kind;
+			pr->scale = obj->Scale.x;
+			pr->x = obj->Coord.x;
+			pr->y = obj->Coord.y;
+			pr->z = obj->Coord.z;
+			pr->rotX = obj->Rot.x;
+			pr->rotY = obj->Rot.y;
+			pr->rotZ = obj->Rot.z;
+		}
+	}
+	snap.numProjectiles = (uint8_t)projCount;
+
+	BroadcastENetPacketToClients(NET_CHANNEL_UNRELIABLE, &snap, sizeof(snap), 0, -1);
+	enet_host_flush(sHost);
+}
+
+void ClientReceive_ControlInfoFromHost(void)
+{
+	if (!gIsNetworkClient || !sHost)
+		return;
+
+	Net_PollLobby();
+}
+
+void Net_ClientUpdateVisualFrame(void)
+{
+	if (!gIsNetworkClient || !sHasSnapshot)
+		return;
+
+	float fps = gFramesPerSecondFrac;
+	float lerpAlpha = 1.0f - expf(-22.0f * (fps > 0.0f ? fps : 0.016f));
+	if (lerpAlpha < 0.0f) lerpAlpha = 0.0f;
+	if (lerpAlpha > 1.0f) lerpAlpha = 1.0f;
+
+	int count = (sCurrSnap.numPlayers <= MAX_PLAYERS) ? sCurrSnap.numPlayers : MAX_PLAYERS;
+	for (int i = 0; i < count; i++)
+	{
+		ObjNode* car = gPlayerInfo[i].objNode;
+		if (!car)
+			continue;
+
+		const NetPlayerSnapshot* ps = &sCurrSnap.players[i];
+		car->OldCoord = car->Coord;
+		car->Coord.x += (ps->x - car->Coord.x) * lerpAlpha;
+		car->Coord.y += (ps->y - car->Coord.y) * lerpAlpha;
+		car->Coord.z += (ps->z - car->Coord.z) * lerpAlpha;
+
+		/* Wrap-safe Y rotation blend */
+		float dRotY = ps->rotY - car->Rot.y;
+		while (dRotY > PI)  dRotY -= PI2;
+		while (dRotY < -PI) dRotY += PI2;
+
+		car->Rot.x += (ps->rotX - car->Rot.x) * lerpAlpha;
+		car->Rot.y += dRotY * lerpAlpha;
+		car->Rot.z += (ps->rotZ - car->Rot.z) * lerpAlpha;
+
+		UpdateCarVisualsFromSnapshot(car);
+		if (gTrackNum == TRACK_NUM_ATLANTIS)
+			AlignPropellerOnSubmarine(car);
+	}
+}
+
+/**********************/
+/* HOST EVENT SENDERS */
+/**********************/
+
+void Net_HostSendPOWPickup(uint32_t itemIndex, short playerNum, short powType, float respawnTimer)
+{
+	if (!gIsNetworkHost || !sHost)
+		return;
+
+	NetReliableEventMsg ev;
+	memset(&ev, 0, sizeof(ev));
+	ev.msgType = kNetMsgReliableEvent;
+	ev.kind = kNetEvent_POWPickup;
+	ev.a = (int8_t)playerNum;
+	ev.b = (int8_t)powType;
+	ev.paramU32 = itemIndex;
+	ev.f0 = respawnTimer;
+	BroadcastENetPacketToClients(NET_CHANNEL_RELIABLE, &ev, sizeof(ev), ENET_PACKET_FLAG_RELIABLE, -1);
+}
+
+void Net_HostSendExplosion(float x, float y, float z, short typeHint)
+{
+	if (!gIsNetworkHost || !sHost)
+		return;
+
+	NetReliableEventMsg ev;
+	memset(&ev, 0, sizeof(ev));
+	ev.msgType = kNetMsgReliableEvent;
+	ev.kind = kNetEvent_Explosion;
+	ev.c = typeHint;
+	ev.f0 = x;
+	ev.f1 = y;
+	ev.f2 = z;
+	BroadcastENetPacketToClients(NET_CHANNEL_RELIABLE, &ev, sizeof(ev), ENET_PACKET_FLAG_RELIABLE, -1);
+}
+
+void Net_HostSendSound3D(short effectId, float x, float y, float z, float volume)
+{
+	if (!gIsNetworkHost || !sHost)
+		return;
+
+	NetReliableEventMsg ev;
+	memset(&ev, 0, sizeof(ev));
+	ev.msgType = kNetMsgReliableEvent;
+	ev.kind = kNetEvent_Sound3D;
+	ev.c = effectId;
+	ev.f0 = x;
+	ev.f1 = y;
+	ev.f2 = z;
+	ev.f3 = volume;
+	BroadcastENetPacketToClients(NET_CHANNEL_RELIABLE, &ev, sizeof(ev), ENET_PACKET_FLAG_RELIABLE, -1);
+}
+
+void Net_HostSendLapOrFinish(short playerNum)
+{
+	if (!gIsNetworkHost || !sHost)
+		return;
+
+	NetReliableEventMsg ev;
+	memset(&ev, 0, sizeof(ev));
+	ev.msgType = kNetMsgReliableEvent;
+	ev.kind = kNetEvent_LapOrFinish;
+	ev.a = (int8_t)playerNum;
+	ev.b = (int8_t)gPlayerInfo[playerNum].place;
+	BroadcastENetPacketToClients(NET_CHANNEL_RELIABLE, &ev, sizeof(ev), ENET_PACKET_FLAG_RELIABLE, -1);
+}
+
+void Net_HostSendFlagEvent(short eventKind, short actorPlayer)
+{
+	if (!gIsNetworkHost || !sHost)
+		return;
+
+	NetReliableEventMsg ev;
+	memset(&ev, 0, sizeof(ev));
+	ev.msgType = kNetMsgReliableEvent;
+	ev.kind = kNetEvent_FlagEvent;
+	ev.a = (int8_t)gCapturedFlagCount[0];
+	ev.b = (int8_t)gCapturedFlagCount[1];
+	ev.c = eventKind;
+	ev.paramU32 = (uint32_t)actorPlayer;
+	BroadcastENetPacketToClients(NET_CHANNEL_RELIABLE, &ev, sizeof(ev), ENET_PACKET_FLAG_RELIABLE, -1);
+}
+
+void Net_HostSendGameOver(short winnerPlayer)
+{
+	if (!gIsNetworkHost || !sHost)
+		return;
+
+	NetReliableEventMsg ev;
+	memset(&ev, 0, sizeof(ev));
+	ev.msgType = kNetMsgReliableEvent;
+	ev.kind = kNetEvent_GameOver;
+	ev.a = (int8_t)winnerPlayer;
+	if (winnerPlayer >= 0 && winnerPlayer < MAX_PLAYERS)
+		ev.b = (int8_t)gPlayerInfo[winnerPlayer].team;
+	ev.c = 0;
+	BroadcastENetPacketToClients(NET_CHANNEL_RELIABLE, &ev, sizeof(ev), ENET_PACKET_FLAG_RELIABLE, -1);
+}
+
+void Net_HostSendElimination(short eliminatedPlayer)
+{
+	if (!gIsNetworkHost || !sHost)
+		return;
+
+	NetReliableEventMsg ev;
+	memset(&ev, 0, sizeof(ev));
+	ev.msgType = kNetMsgReliableEvent;
+	ev.kind = kNetEvent_GameOver;
+	ev.a = (int8_t)eliminatedPlayer;
+	ev.c = 1;
+	BroadcastENetPacketToClients(NET_CHANNEL_RELIABLE, &ev, sizeof(ev), ENET_PACKET_FLAG_RELIABLE, -1);
+}
+
+/**********************/
+/* PROJECTILE TRACKING*/
+/**********************/
+
+void Net_RegisterWeaponObj(struct ObjNode* obj, uint8_t kind)
+{
+	if (!gIsNetworkHost || !obj)
+		return;
+
+	for (int i = 0; i < NET_MAX_PROJECTILES; i++)
+	{
+		if (!sHostWeapons[i].active)
+		{
+			sHostWeapons[i].active = true;
+			sHostWeapons[i].netId = sNextWeaponNetId++;
+			sHostWeapons[i].kind = kind;
+			sHostWeapons[i].obj = obj;
+			return;
+		}
+	}
+}
+
+void Net_UnregisterWeaponObj(struct ObjNode* obj)
+{
+	if (!obj)
+		return;
+
+	for (int i = 0; i < NET_MAX_PROJECTILES; i++)
+	{
+		if (sHostWeapons[i].active && sHostWeapons[i].obj == obj)
+		{
+			memset(&sHostWeapons[i], 0, sizeof(sHostWeapons[i]));
+		}
+		if (sClientWeapons[i].active && sClientWeapons[i].obj == obj)
+		{
+			memset(&sClientWeapons[i], 0, sizeof(sClientWeapons[i]));
+		}
+	}
+}

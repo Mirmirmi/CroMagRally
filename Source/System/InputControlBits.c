@@ -16,7 +16,7 @@
 /*     PROTOTYPES     */
 /**********************/
 
-static void GetLocalKeyStateForPlayer(short playerNum);
+static void GetLocalKeyStateForPlayer(short playerNum, short localPlayerNum);
 
 
 /****************************/
@@ -50,9 +50,11 @@ void ReadKeyboard(void)
 
 			/* EMULATE THE ANALOG INPUT FOR STEERING */
 
-	for (int i = 0; i < gNumLocalPlayers; i++)
+	for (int pane = 0; pane < gNumLocalPlayers && pane < MAX_LOCAL_PLAYERS; pane++)
 	{
-		gPlayerInfo[i].analogSteering = GetAnalogSteering(i);
+		short slot = GetPlayerNum(pane);
+		if (slot >= 0 && slot < MAX_PLAYERS)
+			gPlayerInfo[slot].analogSteering = GetAnalogSteering(pane);
 	}
 
 #if _DEBUG
@@ -93,21 +95,11 @@ int	i;
 
 void GetLocalKeyState(void)
 {
-		/* SEE IF JUST 1 PLAYER ON THIS COMPUTER */
-
-	if (gActiveSplitScreenMode == SPLITSCREEN_MODE_NONE)
+	for (int pane = 0; pane < gNumLocalPlayers && pane < MAX_LOCAL_PLAYERS; pane++)
 	{
-		GetLocalKeyStateForPlayer(gMyNetworkPlayerNum);
-	}
-
-		/* GET KEY STATES FOR BOTH PLAYERS */
-
-	else
-	{
-		for (int i = 0; i < gNumRealPlayers; i++)
-		{
-			GetLocalKeyStateForPlayer(i);
-		}
+		short slot = GetPlayerNum(pane);
+		if (slot >= 0 && slot < MAX_PLAYERS)
+			GetLocalKeyStateForPlayer(slot, (short)pane);
 	}
 }
 
@@ -123,7 +115,7 @@ void GetLocalKeyState(void)
 //
 
 
-static void GetLocalKeyStateForPlayer(short playerNum)
+static void GetLocalKeyStateForPlayer(short playerNum, short localPlayerNum)
 {
 uint32_t	mask,old;
 short	i;
@@ -137,7 +129,7 @@ short	i;
 
 	for (i = 0; i < NUM_CONTROL_BITS; i++)
 	{
-		if (GetNeedState(i, playerNum))								// see if key is down
+		if (GetNeedState(i, localPlayerNum))						// see if key is down
 			gPlayerInfo[playerNum].controlBits |= mask;				// set bit in bitfield
 
 		mask <<= 1;													// shift bit to next position
