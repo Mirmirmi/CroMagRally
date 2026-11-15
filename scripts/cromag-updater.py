@@ -177,12 +177,9 @@ def write_local_state(state_file: Path, release: dict[str, Any], sha256: str) ->
     os.replace(tmp, state_file)
 
 
-def is_game_running(install_path: Path) -> bool:
-    for pattern in (["pgrep", "-x", PROCESS_NAME], ["pgrep", "-f", str(install_path)]):
-        res = subprocess.run(pattern, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if res.returncode == 0:
-            return True
-    return False
+def is_game_running() -> bool:
+    res = subprocess.run(["pgrep", "-x", PROCESS_NAME], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return res.returncode == 0
 
 
 def needs_update(
@@ -340,7 +337,7 @@ def perform_update(
             write_local_state(state_file, remote, remote["sha256"])
         return False
 
-    if is_game_running(install_path):
+    if is_game_running():
         log(f"Update {remote['tag']} available ({reason}), but {PROCESS_NAME} is running; deferring.")
         return False
 
