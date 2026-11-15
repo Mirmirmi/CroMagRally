@@ -34,7 +34,8 @@ Byte		gMultiplayerCPUs = 1;				// add CPU racers to fill multiplayer race slots
 
 ObjNode		*gCurrentPlayer;
 short		gCurrentPlayerNum = 0;				// current player number of player being processed (via MovePlayer et. al.)
-short		gMyNetworkPlayerNum = 0;			// not the same as the ClientID, just a player number that the host assigns.  The host is always player #0
+short		gLocalPlayerNums[MAX_LOCAL_PLAYERS] = {0, 1, 2, 3};
+short		gMyNetworkPlayerNum = 0;			// primary local slot (pane 0) on this machine; split-screen panes use gLocalPlayerNums[]
 
 PlayerInfoType	gPlayerInfo[MAX_PLAYERS];
 
@@ -106,8 +107,22 @@ short	i;
 
 	if (gNetGameInProgress)
 	{
-		gPlayerInfo[gMyNetworkPlayerNum].onThisMachine = true;			// set the local player
-		gPlayerInfo[gMyNetworkPlayerNum].splitPaneNum = 0;
+		int localCount = gNumLocalPlayers;
+		if (localCount < 1)
+			localCount = 1;
+		if (localCount > MAX_LOCAL_PLAYERS)
+			localCount = MAX_LOCAL_PLAYERS;
+
+		for (i = 0; i < localCount; i++)
+		{
+			short slot = gLocalPlayerNums[i];
+			if (slot >= 0 && slot < MAX_PLAYERS)
+			{
+				gPlayerInfo[slot].onThisMachine = true;
+				gPlayerInfo[slot].splitPaneNum = i;
+			}
+		}
+		gMyNetworkPlayerNum = gLocalPlayerNums[0];
 	}
 
 			/* LOCAL GAME */

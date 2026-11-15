@@ -10,6 +10,7 @@
 /****************************/
 
 #include "game.h"
+#include "network.h"
 
 /****************************/
 /*    PROTOTYPES            */
@@ -333,6 +334,7 @@ ObjNode						*newObj,*head,*car;
 	SetThrowDeltas(newObj, car, 1.0, throwForward);
 
 	newObj->WhoThrew = (Ptr)car;														// remember who threw it
+	Net_RegisterWeaponObj(newObj, 0);
 }
 
 
@@ -419,6 +421,7 @@ ObjNode						*newObj,*head,*car;
 
 
 	PlayEffect_Parms3D(EFFECT_SNOWBALL, &car->Coord, NORMAL_CHANNEL_RATE-0x4000, 4.0);
+	Net_RegisterWeaponObj(newObj, 0);
 
 }
 
@@ -583,6 +586,7 @@ ObjNode						*newObj,*head,*car;
 
 	SetThrowDeltas(newObj, car, .6, throwForward);
 	newObj->WhoThrew = (Ptr)car;														// remember who threw it
+	Net_RegisterWeaponObj(newObj, 0);
 
 }
 
@@ -648,6 +652,7 @@ ObjNode	*newObj;
 
 	RotateOnTerrain(newObj, 5.0, nil);							// set transform matrix
 	SetObjectTransformMatrix(newObj);
+	Net_RegisterWeaponObj(newObj, 0);
 }
 
 
@@ -762,7 +767,7 @@ short		p,bestP;
 
 
 	newObj->WhoThrew = (Ptr)car;														// remember who threw it
-
+	Net_RegisterWeaponObj(newObj, 1);
 
 				/**************************/
 				/* FIND BEST TARGET AHEAD */
@@ -934,6 +939,7 @@ ObjNode		*newObj, *car;
 	newObj->Mode = 0;																	// shoot up
 
 	PlayEffect3D(EFFECT_ROMANCANDLE_LAUNCH, &def.coord);
+	Net_RegisterWeaponObj(newObj, 0);
 }
 
 
@@ -1249,6 +1255,7 @@ short		targetP;
 
 	newObj->WhoThrew = (Ptr)car;														// remember who threw it
 	newObj->BottleRocketTimer = 4.0;
+	Net_RegisterWeaponObj(newObj, 0);
 
 	newObj->Rot.x = -PI/2.7f;
 	newObj->DeltaRot.x = 1.0f;
@@ -1570,6 +1577,7 @@ static const OGLPoint3D	nose = {0,0,-100};
 
 
 	PlayEffect_Parms3D(EFFECT_TORPEDOFIRE, &def.coord, NORMAL_CHANNEL_RATE, 3);
+	Net_RegisterWeaponObj(newObj, 0);
 
 }
 
@@ -1838,6 +1846,7 @@ ObjNode						*newObj;
 	newObj->MineArmingTimer = 1.0;							// arming timer
 
 	PlayEffect_Parms3D(EFFECT_MINE, &newObj->Coord, NORMAL_CHANNEL_RATE, 2);
+	Net_RegisterWeaponObj(newObj, 0);
 
 }
 

@@ -266,13 +266,13 @@ int		i;
 				if (gPlayerInfo[i].cameraMode == CAMERA_MODE_FIRSTPERSON)		// hide car if in 1st person mode
 				{
 					SetCarStatusBits(i,STATUS_BIT_NOSHOWTHISPLAYER);
-					if (i == gMyNetworkPlayerNum)
+					if (gPlayerInfo[i].onThisMachine)
 						gCycloramaObj->Scale.x = gCycloramaObj->Scale.y = gCycloramaObj->Scale.z = gGameView->yon * .9f;	// hack to fix z-clip problem in this cam mode
 				}
 				else
 				{
 					ClearCarStatusBits(i,STATUS_BIT_NOSHOWTHISPLAYER);
-					if (i == gMyNetworkPlayerNum)
+					if (gPlayerInfo[i].onThisMachine)
 						gCycloramaObj->Scale.x = gCycloramaObj->Scale.y = gCycloramaObj->Scale.z = gGameView->yon * .99f;
 				}
 				UpdateObjectTransforms(gCycloramaObj);
@@ -339,7 +339,7 @@ void SetDefaultCameraModeForAllPlayers(void)
 
 	for (int i = 0; i < gNumTotalPlayers; i++)
 	{
-		if (is2PTall || (is3PTall && i == 2))	// P3 gets tall pane
+		if (is2PTall || (is3PTall && gPlayerInfo[i].splitPaneNum == 2))	// P3 gets tall pane
 		{
 			gPlayerInfo[i].cameraMode = CAMERA_MODE_NORMAL2;
 		}
@@ -487,12 +487,9 @@ update:
 				/* UPDATE CAMERA INFO */
 				/**********************/
 
-	if (playerInfo->onThisMachine)										// see if this camera is on this machine
+	if (playerInfo->onThisMachine && playerInfo->splitPaneNum >= 0)		// see if this camera is on this machine
 	{
-		if (gNetGameInProgress)											// if network, then update context pane 0
-			OGL_UpdateCameraFromToUp(&from,&to,&up, 0);
-		else
-			OGL_UpdateCameraFromToUp(&from,&to,&up, playerInfo->splitPaneNum);	// otherwise, update context pane based on player/splitscreen #
+		OGL_UpdateCameraFromToUp(&from,&to,&up, playerInfo->splitPaneNum);
 	}
 
 

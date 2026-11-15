@@ -326,6 +326,8 @@ void RotateCarXZ(ObjNode *theNode);
 short DoCPU_AvoidObjects(ObjNode *theCar);
 void DoCPUPowerupLogic(ObjNode *carObj, short playerNum);
 void UpdateNitro(short p);
+void UpdateCarVisualsFromSnapshot(ObjNode *theNode);
+void AlignPropellerOnSubmarine(ObjNode *theCar);
 void SetDefaultPhysics(void);
 
 

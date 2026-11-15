@@ -98,9 +98,22 @@ extern	void SetObjectCollisionBounds(ObjNode *theNode, short top, short bottom, 
 extern	void UpdateShadow(ObjNode *theNode);
 extern	void CullTestAllObjects(void);
 ObjNode	*AttachShadowToObject(ObjNode *theNode, int shadowType, float scaleX, float scaleZ, Boolean checkBlockers);
+typedef struct
+{
+	float minX, maxX;
+	float minY, maxY;
+	float minZ, maxZ;
+} LocalCollisionSubBox;
+
 void CreateCollisionBoxFromBoundingBox(ObjNode *theNode, float tweakXZ, float tweakY);
 void CreateCollisionBoxFromBoundingBox_Maximized(ObjNode *theNode);
 void CreateCollisionBoxFromBoundingBox_Rotated(ObjNode *theNode, float tweakXZ, float tweakY);
+void SetRotatedSubCollisionBox(const ObjNode *theNode, const OGLMatrix3x3 *rotMat, CollisionBoxType *box,
+							   float minX, float maxX, float minY, float maxY, float minZ, float maxZ);
+void CreateRotatedSubCollisionBoxes(ObjNode *theNode, const LocalCollisionSubBox *subBoxes, short count);
+void FillRotatedGridSubBoxes(const ObjNode *theNode, const OGLMatrix3x3 *rotMat, CollisionBoxType *boxes,
+							 float minX, float maxX, float minY, float maxY, float minZ, float maxZ,
+							 short nx, short nz);
 extern	void StopObjectStreamEffect(ObjNode *theNode);
 extern	void KeepOldCollisionBoxes(ObjNode *theNode);
 ObjNode* MakeBackgroundPictureObject(const char* imagePath);

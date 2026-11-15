@@ -11,6 +11,7 @@
 
 #include "game.h"
 #include "bones.h"
+#include "network.h"
 #include <stddef.h>
 
 extern int gMyState_ProjectionType;
@@ -420,7 +421,8 @@ ObjNode		*thisNodePtr;
 
 		if ((!(thisNodePtr->StatusBits & STATUS_BIT_NOMOVE)) &&	(thisNodePtr->MoveCall != nil))
 		{
-			thisNodePtr->MoveCall(thisNodePtr);				// call object's move routine
+			if (!(gIsNetworkClient && gNetGameInProgress && gIsInGame && thisNodePtr->Slot == PLAYER_SLOT))
+				thisNodePtr->MoveCall(thisNodePtr);			// call object's move routine
 		}
 
 next:
@@ -1147,6 +1149,8 @@ void DeleteObject(ObjNode	*theNode)
 
 
 		/* SEE IF NEED TO DEREFERENCE A QD3D OBJECT */
+
+	Net_UnregisterWeaponObj(theNode);
 
 	DisposeObjectBaseGroup(theNode);
 

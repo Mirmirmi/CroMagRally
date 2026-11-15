@@ -148,7 +148,7 @@ float			minX,minZ,maxX,maxZ;
 
 			/* ROTATE BOUNDING BOX */
 
-	OGLMatrix3x3_SetRotate(&m, theNode->Rot.y);
+	OGLMatrix3x3_SetRotate(&m, -theNode->Rot.y);
 
 
 	p.x = bBox->min.x;								// far left corner
@@ -347,6 +347,95 @@ void SetObjectCollisionBounds(ObjNode *theNode, short top, short bottom, short l
 	theNode->BackOff 	= back;
 
 	CalcObjectBoxFromNode(theNode);
+	KeepOldCollisionBoxes(theNode);
+}
+
+
+/****************** SET ROTATED SUB-COLLISION BOX ******************/
+/* Transforms a local-space sub-box around theNode->Coord by rotMat (built for
+   -theNode->Rot.y) and writes the tight world-space AABB into *box. */
+
+void SetRotatedSubCollisionBox(const ObjNode *theNode, const OGLMatrix3x3 *rotMat, CollisionBoxType *box,
+							   float minX, float maxX, float minY, float maxY, float minZ, float maxZ)
+{
+	const float xs[2] = {minX * theNode->Scale.x, maxX * theNode->Scale.x};
+	const float zs[2] = {minZ * theNode->Scale.z, maxZ * theNode->Scale.z};
+	float worldMinX = 0.0f, worldMaxX = 0.0f;
+	float worldMinZ = 0.0f, worldMaxZ = 0.0f;
+
+	for (int ix = 0; ix < 2; ix++)
+	{
+		for (int iz = 0; iz < 2; iz++)
+		{
+			OGLPoint2D localPt = {xs[ix], zs[iz]};
+			OGLPoint2D rotPt;
+			OGLPoint2D_Transform(&localPt, rotMat, &rotPt);
+
+			if (ix == 0 && iz == 0)
+			{
+				worldMinX = worldMaxX = rotPt.x;
+				worldMinZ = worldMaxZ = rotPt.y;
+			}
+			else
+			{
+				if (rotPt.x < worldMinX) worldMinX = rotPt.x;
+				if (rotPt.x > worldMaxX) worldMaxX = rotPt.x;
+				if (rotPt.y < worldMinZ) worldMinZ = rotPt.y;
+				if (rotPt.y > worldMaxZ) worldMaxZ = rotPt.y;
+			}
+		}
+	}
+
+	box->left   = (long)floorf(theNode->Coord.x + worldMinX);
+	box->right  = (long)ceilf(theNode->Coord.x + worldMaxX);
+	box->bottom = (long)floorf(theNode->Coord.y + minY * theNode->Scale.y);
+	box->top    = (long)ceilf(theNode->Coord.y + maxY * theNode->Scale.y);
+	box->back   = (long)floorf(theNode->Coord.z + worldMinZ);
+	box->front  = (long)ceilf(theNode->Coord.z + worldMaxZ);
+}
+
+
+/****************** FILL ROTATED GRID SUB-BOXES ******************/
+
+void FillRotatedGridSubBoxes(const ObjNode *theNode, const OGLMatrix3x3 *rotMat, CollisionBoxType *boxes,
+							 float minX, float maxX, float minY, float maxY, float minZ, float maxZ,
+							 short nx, short nz)
+{
+	const float dx = (maxX - minX) / (float)nx;
+	const float dz = (maxZ - minZ) / (float)nz;
+	short idx = 0;
+
+	for (short ix = 0; ix < nx; ix++)
+	{
+		float x0 = minX + (float)ix * dx;
+		float x1 = (ix + 1 == nx) ? maxX : (x0 + dx);
+		for (short iz = 0; iz < nz; iz++)
+		{
+			float z0 = minZ + (float)iz * dz;
+			float z1 = (iz + 1 == nz) ? maxZ : (z0 + dz);
+			SetRotatedSubCollisionBox(theNode, rotMat, &boxes[idx++], x0, x1, minY, maxY, z0, z1);
+		}
+	}
+}
+
+
+/****************** CREATE ROTATED SUB-COLLISION BOXES ******************/
+
+void CreateRotatedSubCollisionBoxes(ObjNode *theNode, const LocalCollisionSubBox *subBoxes, short count)
+{
+	OGLMatrix3x3 rotMat;
+
+	AllocateCollisionBoxMemory(theNode, count);
+	OGLMatrix3x3_SetRotate(&rotMat, -theNode->Rot.y);
+
+	for (short i = 0; i < count; i++)
+	{
+		SetRotatedSubCollisionBox(theNode, &rotMat, &theNode->CollisionBoxes[i],
+								  subBoxes[i].minX, subBoxes[i].maxX,
+								  subBoxes[i].minY, subBoxes[i].maxY,
+								  subBoxes[i].minZ, subBoxes[i].maxZ);
+	}
+
 	KeepOldCollisionBoxes(theNode);
 }
 

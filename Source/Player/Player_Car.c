@@ -1343,6 +1343,82 @@ float	fps = gFramesPerSecondFrac;
 	}
 }
 
+void UpdateCarVisualsFromSnapshot(ObjNode *theNode)
+{
+	if (!theNode)
+		return;
+
+	short p = theNode->PlayerNum;
+	float fps = gFramesPerSecondFrac;
+
+	GetObjectInfo(theNode);
+	UpdateObject(theNode);
+	gPlayerInfo[p].coord = theNode->Coord;
+	theNode->Speed3D = CalcVectorLength(&theNode->Delta);
+
+	/* Keep visual ice tint synchronized when frozen */
+	if (gPlayerInfo[p].frozenTimer > 0.0f)
+	{
+		ObjNode *obj = gPlayerInfo[p].objNode;
+		while (obj)
+		{
+			obj->ColorFilter.r = 0.3f;
+			obj->ColorFilter.g = 0.7f;
+			obj->ColorFilter.b = 1.0f;
+			obj = obj->ChainNode;
+		}
+	}
+
+	UpdateNitro(p);
+	UpdateStickyTires(p);
+	UpdateSuperSuspension(p);
+	UpdateInvisibility(p);
+	UpdateFrozenTimer(p);
+	UpdateFlaming(p);
+
+	if (gPlayerInfo[p].wheelObj[0] != nil)
+	{
+		AlignWheelsAndHeadOnCar(theNode);
+		UpdateTireSkidMarks(theNode);
+	}
+
+	if (gPlayerInfo[p].gasPedalDown)
+	{
+		float max = gPlayerInfo[p].carStats.maxSpeed * (1.0f / 5000.0f);
+		gPlayerInfo[p].currentRPM += gPlayerInfo[p].carStats.acceleration * 0.0003f * fps;
+		if (!(theNode->StatusBits & STATUS_BIT_ONGROUND))
+			max *= 1.3f;
+		if (gPlayerInfo[p].currentRPM > max)
+			gPlayerInfo[p].currentRPM = max;
+	}
+	else
+	{
+		gPlayerInfo[p].currentRPM -= gPlayerInfo[p].carStats.acceleration * 0.0003f * fps;
+		if (gPlayerInfo[p].currentRPM < 0.0f)
+			gPlayerInfo[p].currentRPM = 0.0f;
+	}
+
+	if (gPlayerInfo[p].isEliminated)
+	{
+		if (gPlayerInfo[p].engineChannel != -1)
+			StopAChannel(&gPlayerInfo[p].engineChannel);
+	}
+	else if (gPlayerInfo[p].engineChannel != -1)
+	{
+		Update3DSoundChannel(EFFECT_ENGINE, &gPlayerInfo[p].engineChannel, &theNode->Coord);
+	}
+	else
+	{
+		gPlayerInfo[p].engineChannel = PlayEffect_Parms3D(EFFECT_ENGINE, &theNode->Coord, NORMAL_CHANNEL_RATE, ENGINE_VOLUME);
+	}
+
+	if (gPlayerInfo[p].engineChannel != -1)
+	{
+		int freq = NORMAL_CHANNEL_RATE + (int)(gPlayerInfo[p].currentRPM * 150000.0f);
+		ChangeChannelRate(gPlayerInfo[p].engineChannel, freq);
+	}
+}
+
 
 /**************** UPDATE NITRO ***********************/
 //
@@ -1375,19 +1451,9 @@ int		pane;
 		// Do a tunnel-vision effect when using nitro.
 		//
 
-	if (gNetGameInProgress)
-	{
-		if (p != gMyNetworkPlayerNum)									// bail if this isnt the local player
-			return;
-		else
-			pane = 0;
-	}
-	else
-	{
-		if (p >= gNumSplitScreenPanes)							// bail if player doesnt have its own pane
-			return;
-		pane = p;
-	}
+	if (!gPlayerInfo[p].onThisMachine || gPlayerInfo[p].splitPaneNum < 0 || gPlayerInfo[p].splitPaneNum >= gNumSplitScreenPanes)
+		return;
+	pane = gPlayerInfo[p].splitPaneNum;
 
 
 

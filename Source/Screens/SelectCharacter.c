@@ -11,6 +11,7 @@
 /****************************/
 
 #include "game.h"
+#include "network.h"
 
 /****************************/
 /*    PROTOTYPES            */
@@ -129,6 +130,8 @@ Boolean DoCharacterSelectScreen(short whichPlayer, Boolean allowAborting)
 
 		CalcFramesPerSecond();
 		ReadKeyboard();
+		if (gNetGameInProgress)
+			Net_PollLobby();
 		MoveObjects();
 		OGL_DrawScene(DrawObjects);
 	}
@@ -451,9 +454,10 @@ static void CycleSkin(short whichPlayer, int delta)
 			/* FIND OUT WHICH SKINS ARE ALREADY TAKEN */
 
 	uint32_t skinsTaken = 0;
-	for (int prevPlayer = 0; prevPlayer < whichPlayer; prevPlayer++)
+	int myPane = gNetGameInProgress ? gPlayerInfo[whichPlayer].splitPaneNum : whichPlayer;
+	for (int prevPane = 0; prevPane < myPane; prevPane++)
 	{
-		skinsTaken |= (1 << gPlayerInfo[prevPlayer].skin);
+		skinsTaken |= (1 << gPlayerInfo[GetPlayerNum(prevPane)].skin);
 	}
 
 			/* CYCLE TO NEXT AVAILABLE SKIN */
@@ -562,10 +566,9 @@ static Boolean DoCharacterSelectControls(short whichPlayer, Boolean allowAbortin
 short	p;
 
 
-	if (gNetGameInProgress)										// if net game, then use P0 controls
+	p = gNetGameInProgress ? gPlayerInfo[whichPlayer].splitPaneNum : whichPlayer;
+	if (p < 0)
 		p = 0;
-	else
-		p = whichPlayer;										// otherwise, use P0 or P1 controls depending.
 
 
 		/* SEE IF ABORT */

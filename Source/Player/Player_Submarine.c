@@ -25,7 +25,6 @@ static void SubHitSub(ObjNode *car1, ObjNode *car2);
 static void DoCPUControl_Sub(ObjNode *theNode);
 static void CreateSubmarinePropeller(ObjNode *theCar, short playerNum);
 static void DoPlayerControl_Submarine(ObjNode *theNode);
-static void AlignPropellerOnSubmarine(ObjNode *theCar);
 
 
 /****************************/
@@ -807,7 +806,7 @@ float			fps = gFramesPerSecondFrac;
 
 /************************ ALIGN PROPELLER ON SUBMARINE *****************************/
 
-static void AlignPropellerOnSubmarine(ObjNode *theCar)
+void AlignPropellerOnSubmarine(ObjNode *theCar)
 {
 float			fps = gFramesPerSecondFrac;
 ObjNode			*prop;

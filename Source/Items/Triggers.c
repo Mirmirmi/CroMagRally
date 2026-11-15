@@ -10,6 +10,7 @@
 /****************************/
 
 #include "game.h"
+#include "network.h"
 
 /*******************/
 /*   PROTOTYPES    */
@@ -343,6 +344,12 @@ Boolean	thud = false;
 
 	theNode->POWHidden = true;
 	theNode->POWHiddenTimer = 5.0;					// n seconds until it reappears
+
+	if (gIsNetworkHost && theNode->TerrainItemPtr != nil && gMasterItemList && *gMasterItemList)
+	{
+		uint32_t idx = (uint32_t)(theNode->TerrainItemPtr - (*gMasterItemList));
+		Net_HostSendPOWPickup(idx, playerNum, theNode->POWType, theNode->POWHiddenTimer);
+	}
 	theNode->StatusBits |= STATUS_BIT_HIDDEN;
 	theNode->CType = 0;
 
@@ -559,6 +566,12 @@ short	playerNum;
 
 	theNode->POWHidden = true;
 	theNode->POWHiddenTimer = 5.0;					// n seconds until it reappears
+
+	if (gIsNetworkHost && theNode->TerrainItemPtr != nil && gMasterItemList && *gMasterItemList)
+	{
+		uint32_t idx = (uint32_t)(theNode->TerrainItemPtr - (*gMasterItemList));
+		Net_HostSendPOWPickup(idx, playerNum, theNode->POWType, theNode->POWHiddenTimer);
+	}
 	theNode->StatusBits |= STATUS_BIT_HIDDEN;
 	theNode->CType = 0;
 
@@ -654,6 +667,12 @@ short	playerNum;
 
 	theNode->POWHidden = true;
 	theNode->POWHiddenTimer = 5.0;					// n seconds until it reappears
+
+	if (gIsNetworkHost && theNode->TerrainItemPtr != nil && gMasterItemList && *gMasterItemList)
+	{
+		uint32_t idx = (uint32_t)(theNode->TerrainItemPtr - (*gMasterItemList));
+		Net_HostSendPOWPickup(idx, playerNum, theNode->POWType, theNode->POWHiddenTimer);
+	}
 	theNode->StatusBits |= STATUS_BIT_HIDDEN;
 	theNode->CType = 0;
 
@@ -752,6 +771,12 @@ short	playerNum;
 
 	theNode->POWHidden = true;
 	theNode->POWHiddenTimer = 5.0;					// n seconds until it reappears
+
+	if (gIsNetworkHost && theNode->TerrainItemPtr != nil && gMasterItemList && *gMasterItemList)
+	{
+		uint32_t idx = (uint32_t)(theNode->TerrainItemPtr - (*gMasterItemList));
+		Net_HostSendPOWPickup(idx, playerNum, theNode->POWType, theNode->POWHiddenTimer);
+	}
 	theNode->StatusBits |= STATUS_BIT_HIDDEN;
 	theNode->CType = 0;
 
@@ -1407,9 +1432,15 @@ short	teamNum;
 			PlayEffect_Parms(EFFECT_REDTEAMWINS, FULL_CHANNEL_VOLUME * 3, FULL_CHANNEL_VOLUME*2, NORMAL_CHANNEL_RATE);
 		else
 			PlayEffect_Parms(EFFECT_GREENTEAMWINS, FULL_CHANNEL_VOLUME * 3, FULL_CHANNEL_VOLUME*2, NORMAL_CHANNEL_RATE);
+
+		if (gIsNetworkHost)
+			Net_HostSendFlagEvent((teamNum == 0) ? 1 : 2, whoNode->PlayerNum);
 	}
 	else														// say "Score!"
 	{
+		if (gIsNetworkHost)
+			Net_HostSendFlagEvent(0, whoNode->PlayerNum);
+
 		if (gPlayerInfo[whoNode->PlayerNum].onThisMachine)
 		{
 			if (gPlayerInfo[whoNode->PlayerNum].team == teamNum)
@@ -2037,6 +2068,27 @@ short	p;
 	SetSuspensionPOW(p);
 
 	return(true);
+}
+
+
+void Net_ClientHidePOWTrigger(const TerrainItemEntryType *targetPtr, float timer)
+{
+	if (!targetPtr)
+		return;
+
+	for (ObjNode *node = gFirstNodePtr; node != NULL; node = node->NextNode)
+	{
+		if (node->Slot == TRIGGER_SLOT && node->TerrainItemPtr == targetPtr)
+		{
+			node->POWHidden = true;
+			node->POWHiddenTimer = timer;
+			node->CType = 0;
+			node->StatusBits |= STATUS_BIT_HIDDEN;
+			if (node->ShadowNode)
+				node->ShadowNode->StatusBits |= STATUS_BIT_HIDDEN;
+			break;
+		}
+	}
 }
 
 

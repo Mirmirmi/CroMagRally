@@ -8,6 +8,7 @@
 /***************/
 
 #include "game.h"
+#include "network.h"
 
 
 /****************************/
@@ -381,6 +382,9 @@ void PlayerCompletedRace(short playerNum)
 					ShowFinalPlace(i, (i == playerNum) ? rankInScoreboard : -1);
 				}
 			}
+
+			if (gIsNetworkHost)
+				Net_HostSendLapOrFinish(playerNum);
 
 			gTrackCompleted = true;
 			gTrackCompletedCoolDownTimer = TRACK_COMPLETE_COOLDOWN_TIME;

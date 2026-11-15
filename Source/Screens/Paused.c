@@ -13,6 +13,7 @@
 #include "game.h"
 #include "menu.h"
 #include "network.h"
+#include "player.h"
 #include "miscscreens.h"
 
 /****************************/
@@ -141,14 +142,54 @@ void OnToggleSplitscreenMode(const MenuItem* mi)
 
 static void UpdatePausedMenuCallback(void)
 {
+	if (gNetGameInProgress)
+	{
+		/* Keep LAN session ticking live behind pause menu */
+		gGamePaused = false;
+		if (gIsNetworkHost)
+		{
+			HostReceive_ControlInfoFromClients();
+			for (int pane = 0; pane < gNumLocalPlayers && pane < MAX_LOCAL_PLAYERS; pane++)
+			{
+				short slot = gLocalPlayerNums[pane];
+				if (slot >= 0 && slot < MAX_PLAYERS)
+				{
+					gPlayerInfo[slot].controlBits = 0;
+					gPlayerInfo[slot].controlBits_New = 0;
+					gPlayerInfo[slot].analogSteering = (OGLVector2D){0, 0};
+				}
+			}
+			MoveEverything();
+			UpdateGameModeSpecifics();
+			DoPlayerTerrainUpdate();
+			HostSend_ControlInfoToClients();
+		}
+		else
+		{
+			ClientReceive_ControlInfoFromHost();
+			MoveEverything();
+			Net_ClientUpdateVisualFrame();
+			if (gGameMode == GAME_MODE_TAG1 || gGameMode == GAME_MODE_TAG2)
+				UpdateTagMarker();
+			DoPlayerTerrainUpdate();
+			for (int pane = 0; pane < gNumLocalPlayers && pane < MAX_LOCAL_PLAYERS; pane++)
+			{
+				short slot = gLocalPlayerNums[pane];
+				if (slot >= 0 && slot < MAX_PLAYERS)
+				{
+					gPlayerInfo[slot].controlBits = 0;
+					gPlayerInfo[slot].controlBits_New = 0;
+					gPlayerInfo[slot].analogSteering = (OGLVector2D){0, 0};
+				}
+			}
+			ClientSend_ControlInfoToHost();
+		}
+		gGamePaused = true;
+		return;
+	}
+
 	MoveObjects();
 	DoPlayerTerrainUpdate();							// need to call this to keep supertiles active
-
-
-			/* IF DOING NET GAME, LET OTHER PLAYERS KNOW WE'RE STILL GOING SO THEY DONT TIME OUT */
-
-	if (gNetGameInProgress)
-		PlayerBroadcastNullPacket();
 }
 
 void DoPaused(void)
@@ -189,10 +230,13 @@ void DoPaused(void)
 			break;
 
 		case	'bail':								// EXIT
+			Net_DisconnectGracefully();
 			gGameOver = true;
 			break;
 
 		case	'quit':								// QUIT
+			Net_DisconnectGracefully();
+			ShutdownNetworkManager();
 			CleanQuit();
 			break;
 	}

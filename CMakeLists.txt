@@ -98,6 +98,7 @@ endif()
 #------------------------------------------------------------------------------
 
 add_subdirectory(extern/Pomme)
+add_subdirectory(extern/enet)
 
 find_package(OpenGL REQUIRED)
 
@@ -216,7 +217,7 @@ else()
 endif()
 
 # Link core dependencies
-target_link_libraries(${GAME_TARGET} PRIVATE Pomme OpenGL::GL)
+target_link_libraries(${GAME_TARGET} PRIVATE Pomme enet OpenGL::GL)
 
 # Add required frameworks for KillMacMouseAcceleration
 if(APPLE)
@@ -318,3 +319,19 @@ endif()
 
 # Copy documentation to output folder
 configure_file(${CMAKE_SOURCE_DIR}/packaging/ReadMe.txt.in ${CMAKE_CURRENT_BINARY_DIR}/ReadMe.txt)
+
+include(CTest)
+if(BUILD_TESTING AND NOT WIN32)
+	add_executable(net_loopback_test
+		tests/net_loopback_test.c
+		${GAME_SRCDIR}/System/network.c
+	)
+	target_include_directories(net_loopback_test PRIVATE ${GAME_SRCDIR}/Headers)
+	if(TARGET SDL3::SDL3)
+		target_link_libraries(net_loopback_test PRIVATE SDL3::SDL3)
+	else()
+		target_link_libraries(net_loopback_test PRIVATE SDL3::SDL3-static)
+	endif()
+	target_link_libraries(net_loopback_test PRIVATE Pomme enet m)
+	add_test(NAME net_loopback_test COMMAND net_loopback_test)
+endif()
