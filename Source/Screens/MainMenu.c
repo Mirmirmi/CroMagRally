@@ -29,6 +29,7 @@ static void OnPickTournamentAge(const MenuItem* mi);
 static void OnPickHostOrJoin(const MenuItem* mi);
 static void OnPickClearSavedGame(const MenuItem* mi);
 static void OnPickTagDuration(const MenuItem* mi);
+static void OnPickNetLocalPlayers(const MenuItem* mi);
 
 static int IsClearSavedGameAvailable(const MenuItem* mi);
 static int IsTournamentAgeAvailable(const MenuItem* mi);
@@ -55,6 +56,8 @@ enum
 /*    VARIABLES      */
 /*********************/
 
+static Byte sNetLocalPlayersChoice = 1;
+
 static const MenuItem gMainMenuTree[] =
 {
 	{ .id='titl' },
@@ -68,7 +71,7 @@ static const MenuItem gMainMenuTree[] =
 	{kMIPick, STR_2PLAYER,	.id=2, .callback=OnConfirmPlayMenu, .next='mpgm' },
 	{kMIPick, STR_3PLAYER,	.id=3, .callback=OnConfirmPlayMenu, .next='mpgm' },
 	{kMIPick, STR_4PLAYER,	.id=4, .callback=OnConfirmPlayMenu, .next='mpgm' },
-//	{kMIPick, STR_NET_GAME,	.id=0, .callback=OnConfirmPlayMenu, .next='netg' },
+	{kMIPick, STR_NET_GAME,	.id=0, .callback=OnConfirmPlayMenu, .next='netg' },
 
 	{ .id='optn' },
 	{
@@ -116,8 +119,22 @@ static const MenuItem gMainMenuTree[] =
 	{kMIPick, STR_IRON_AGE,		.callback=OnPickTournamentAge, .id=IRON_AGE,	.next='EXIT', .getLayoutFlags=IsTournamentAgeAvailable},
 
 	{ .id='netg' },
+	{kMITextInput, STR_PLAYER_NAME, .textInput={ gGamePrefs.playerName, (int)sizeof(gGamePrefs.playerName), false } },
+	{
+		kMICycler1, STR_LOCAL_PLAYERS, .callback=OnPickNetLocalPlayers, .cycler=
+		{
+			.valuePtr=&sNetLocalPlayersChoice, .choices=
+			{
+				{STR_1PLAYER, 1},
+				{STR_2PLAYER, 2},
+				{STR_3PLAYER, 3},
+				{STR_4PLAYER, 4},
+			}
+		}
+	},
+	{kMISpacer, .customHeight=0.5f },
 	{kMIPick, STR_HOST_NET_GAME, .callback=OnPickHostOrJoin, .id=0, .next='mpgm' }, // host gets to select game type
-	{kMIPick, STR_JOIN_NET_GAME, .callback=OnPickHostOrJoin, .id=1 },
+	{kMIPick, STR_JOIN_NET_GAME, .callback=OnPickHostOrJoin, .id=1, .next='EXIT' },
 
 	{ .id='clrs' },
 	{kMILabel, .text=STR_CLEAR_SAVED_GAME_TEXT_1 },
@@ -410,8 +427,10 @@ static void OnConfirmPlayMenu(const MenuItem* mi)
 
 		case 0:
 			gNetGameInProgress = true;
-			gNumRealPlayers = 1;
-			gNumLocalPlayers = 1;
+			if (sNetLocalPlayersChoice < 1 || sNetLocalPlayersChoice > MAX_LOCAL_PLAYERS)
+				sNetLocalPlayersChoice = 1;
+			gNumLocalPlayers = sNetLocalPlayersChoice;
+			gNumRealPlayers = gNumLocalPlayers;
 			break;
 
 		default:
@@ -431,6 +450,10 @@ static void OnPickTournamentAge(const MenuItem* mi)
 
 static void OnPickHostOrJoin(const MenuItem* mi)
 {
+	if (sNetLocalPlayersChoice < 1 || sNetLocalPlayersChoice > MAX_LOCAL_PLAYERS)
+		sNetLocalPlayersChoice = 1;
+	gNumLocalPlayers = sNetLocalPlayersChoice;
+
 	switch (mi->text)
 	{
 		case STR_HOST_NET_GAME:
@@ -459,6 +482,14 @@ static void OnPickClearSavedGame(const MenuItem* mi)
 static void OnPickTagDuration(const MenuItem* mi)
 {
 	gGamePrefs.tagDuration = mi->id;
+}
+
+static void OnPickNetLocalPlayers(const MenuItem* mi)
+{
+	(void)mi;
+	if (sNetLocalPlayersChoice < 1 || sNetLocalPlayersChoice > MAX_LOCAL_PLAYERS)
+		sNetLocalPlayersChoice = 1;
+	gNumLocalPlayers = sNetLocalPlayersChoice;
 }
 
 #pragma mark -

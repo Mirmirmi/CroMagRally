@@ -267,7 +267,7 @@ void DoSDLMaintenance(void)
 				break;
 
 			case SDL_EVENT_TEXT_INPUT:
-				SDL_snprintf(gTextInput, sizeof(gTextInput), "%s", event.text.text);
+				SDL_strlcat(gTextInput, event.text.text, sizeof(gTextInput));
 				break;
 
 			case SDL_EVENT_MOUSE_MOTION:
@@ -368,6 +368,18 @@ Boolean GetNewClickState(int mouseButton)
 }
 
 #pragma mark -
+
+void SetTextInputActive(Boolean active)
+{
+	extern SDL_Window* gSDLWindow;
+	if (!gSDLWindow)
+		return;
+
+	if (active)
+		SDL_StartTextInput(gSDLWindow);
+	else
+		SDL_StopTextInput(gSDLWindow);
+}
 
 Boolean GetNeedState(int needID, int playerID)
 {
@@ -834,9 +846,11 @@ void UnlockPlayerGamepadMapping(void)
 const char* GetPlayerName(int whichPlayer)
 {
 	static char playerName[64];
+	int localIdx = (gNetGameInProgress && gPlayerInfo[whichPlayer].splitPaneNum >= 0)
+		? gPlayerInfo[whichPlayer].splitPaneNum : whichPlayer;
 
 	SDL_snprintf(playerName, sizeof(playerName),
-			"%s %d", Localize(STR_PLAYER), whichPlayer+1);
+			"%s %d", Localize(STR_PLAYER), localIdx + 1);
 
 	return playerName;
 }
@@ -844,11 +858,13 @@ const char* GetPlayerName(int whichPlayer)
 const char* GetPlayerNameWithInputDeviceHint(int whichPlayer)
 {
 	static char playerName[128];
+	int localIdx = (gNetGameInProgress && gPlayerInfo[whichPlayer].splitPaneNum >= 0)
+		? gPlayerInfo[whichPlayer].splitPaneNum : whichPlayer;
 
 	playerName[0] = '\0';
 
 	snprintfcat(playerName, sizeof(playerName),
-			"%s %d", Localize(STR_PLAYER), whichPlayer+1);
+			"%s %d", Localize(STR_PLAYER), localIdx + 1);
 
 	if (gGameMode == GAME_MODE_CAPTUREFLAG)
 	{
@@ -858,9 +874,9 @@ const char* GetPlayerNameWithInputDeviceHint(int whichPlayer)
 
 	bool enoughGamepads = GetNumGamepads() >= gNumLocalPlayers;
 
-	if (!enoughGamepads)
+	if (!enoughGamepads && localIdx >= 0 && localIdx < MAX_LOCAL_PLAYERS)
 	{
-		bool hasGamepad = gGamepads[whichPlayer].open;
+		bool hasGamepad = gGamepads[localIdx].open;
 		snprintfcat(playerName, sizeof(playerName),
 					"\n[%s]", Localize(hasGamepad? STR_GAMEPAD: STR_KEYBOARD));
 	}

@@ -155,5 +155,5 @@ enum
 #include "structs.h"
 
 
-#define	GetPlayerNum(noNet)	(gNetGameInProgress ? gMyNetworkPlayerNum : (noNet))
+#define	GetPlayerNum(noNet)	(gNetGameInProgress ? gLocalPlayerNums[(noNet)] : (noNet))
 

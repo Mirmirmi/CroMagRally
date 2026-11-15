@@ -110,4 +110,5 @@ void GameMain(void);
 void ToolBoxInit(void);
 void FadeOutArea(void);
 void MoveEverything(void);
+void UpdateGameModeSpecifics(void);
 void InitDefaultPrefs(void);

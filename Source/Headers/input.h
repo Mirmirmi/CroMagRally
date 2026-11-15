@@ -138,3 +138,6 @@ const char* GetPlayerNameWithInputDeviceHint(int whichPlayer);
 void ResetDefaultKeyboardBindings(void);
 void ResetDefaultGamepadBindings(void);
 void ResetDefaultMouseBindings(void);
+
+extern char gTextInput[64];
+void SetTextInputActive(Boolean active);

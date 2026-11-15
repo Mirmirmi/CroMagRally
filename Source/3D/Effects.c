@@ -10,6 +10,7 @@
 /****************************/
 
 #include "game.h"
+#include "network.h"
 
 /****************************/
 /*    PROTOTYPES            */
@@ -972,7 +973,11 @@ short					p;
 	else
 		p = -1;
 
-	BlastCars(p, where.x, where.y, where.z, BONEBOMB_BLAST_RADIUS);
+	if (gIsNetworkHost)
+		Net_HostSendExplosion(where.x, where.y, where.z, 0);
+
+	if (!gIsNetworkClient)
+		BlastCars(p, where.x, where.y, where.z, BONEBOMB_BLAST_RADIUS);
 
 }
 
