@@ -1347,6 +1347,74 @@ static void NavigateMouseBinding(const MenuItem* entry)
 #endif
 }
 
+static char sIPOctets[4][4];
+static bool sIPOctetUntouched[4];
+static int  sIPCurOctet = 0;
+static bool sIPJustAutoAdvanced = false;
+static char sIPOriginalBuf[32];
+
+static int ParseDecimalInt(const char* s)
+{
+	int v = 0;
+	for (int i = 0; s && s[i]; i++)
+	{
+		if (s[i] < '0' || s[i] > '9')
+			return -1;
+		v = v * 10 + (s[i] - '0');
+	}
+	return (s && s[0]) ? v : -1;
+}
+
+static void StartIPSectionEdit(const char* src)
+{
+	SDL_strlcpy(sIPOriginalBuf, src ? src : "", sizeof(sIPOriginalBuf));
+	for (int i = 0; i < 4; i++)
+	{
+		SDL_strlcpy(sIPOctets[i], "0", sizeof(sIPOctets[i]));
+		sIPOctetUntouched[i] = true;
+	}
+	sIPCurOctet = 0;
+	sIPJustAutoAdvanced = false;
+
+	if (!src || !src[0])
+		return;
+
+	int seg = 0;
+	const char* p = src;
+	while (*p && seg < 4)
+	{
+		int val = 0;
+		int digits = 0;
+		while (*p >= '0' && *p <= '9' && digits < 3)
+		{
+			val = val * 10 + (*p - '0');
+			p++;
+			digits++;
+		}
+		if (digits > 0 && val <= 255)
+			SDL_snprintf(sIPOctets[seg], sizeof(sIPOctets[seg]), "%d", val);
+		seg++;
+		if (*p == '.')
+			p++;
+		else
+			break;
+	}
+}
+
+static void FormatIPSectionPreview(char* out, int outSize)
+{
+	char parts[4][8];
+	for (int i = 0; i < 4; i++)
+	{
+		const char* s = sIPOctets[i][0] ? sIPOctets[i] : "_";
+		if (i == sIPCurOctet)
+			SDL_snprintf(parts[i], sizeof(parts[i]), "[%s]", s);
+		else
+			SDL_snprintf(parts[i], sizeof(parts[i]), "%s", s);
+	}
+	SDL_snprintf(out, (size_t)outSize, "%s.%s.%s.%s", parts[0], parts[1], parts[2], parts[3]);
+}
+
 static ObjNode* MakeTextInputValueObj(int row)
 {
 	DECLARE_WORKBUF(buf, bufSize);
@@ -1354,7 +1422,10 @@ static ObjNode* MakeTextInputValueObj(int row)
 	const char* val = (entry->textInput.buffer && entry->textInput.buffer[0]) ? entry->textInput.buffer : "---";
 	if (gNav->menuState == kMenuStateEditingText && gNav->menuRow == row)
 	{
-		SDL_snprintf(buf, bufSize, "%s-", (entry->textInput.buffer ? entry->textInput.buffer : ""));
+		if (entry->textInput.ipOnly)
+			FormatIPSectionPreview(buf, bufSize);
+		else
+			SDL_snprintf(buf, bufSize, "%s-", (entry->textInput.buffer ? entry->textInput.buffer : ""));
 	}
 	else
 	{
@@ -1363,6 +1434,18 @@ static ObjNode* MakeTextInputValueObj(int row)
 	ObjNode* valObj = MakeText(buf, row, 1, 0);
 	valObj->MoveCall = MoveControlBinding;
 	GetMenuNodeData(valObj)->col = 0;
+
+	float baseScale = GetMenuItemHeight(row) * gNav->style.standardScale;
+	valObj->Scale = (OGLVector3D) { baseScale, baseScale, baseScale };
+	OGLRect ext = TextMesh_GetExtents(valObj);
+	float w = ext.right - ext.left;
+	if (w > 260.0f && w > 1.0f)
+	{
+		float s = baseScale * (260.0f / w);
+		valObj->Scale = (OGLVector3D) { s, s, s };
+	}
+	UpdateObjectTransforms(valObj);
+
 	return valObj;
 }
 
@@ -1376,11 +1459,188 @@ static void NavigateTextInput(const MenuItem* entry)
 		gNav->idleTime = 0;
 		gNav->menuCol = 0;
 		gNav->menuState = kMenuStateEditingText;
+		if (entry->textInput.ipOnly)
+			StartIPSectionEdit(entry->textInput.buffer);
 		SetTextInputActive(true);
 		InvalidateAllInputs();
 		gTextInput[0] = '\0';
 		MakeTextInputValueObj(gNav->menuRow);
 		TwitchSelection();
+	}
+}
+
+static void HandleIPTextInput(const MenuItem* entry)
+{
+	char* buf = entry->textInput.buffer;
+	int maxLen = entry->textInput.maxLength;
+	Boolean changed = false;
+
+	if (GetNewKeyState(SDL_SCANCODE_ESCAPE))
+	{
+		PlayEffect(kSfxBack);
+		SDL_strlcpy(buf, sIPOriginalBuf, (size_t)maxLen);
+		SetTextInputActive(false);
+		gNav->menuState = kMenuStateReady;
+		InvalidateAllInputs();
+		MakeTextInputValueObj(gNav->menuRow);
+		return;
+	}
+
+	if (GetNewKeyState(SDL_SCANCODE_RETURN) || GetNewKeyState(SDL_SCANCODE_KP_ENTER))
+	{
+		int vals[4];
+		for (int i = 0; i < 4; i++)
+		{
+			vals[i] = ParseDecimalInt(sIPOctets[i]);
+			if (vals[i] < 0 || vals[i] > 255)
+			{
+				sIPCurOctet = i;
+				PlayEffect(EFFECT_BADSELECT);
+				ObjNode* valObj = GetNthChainedNode(GetCurrentMenuItemObject(), 1, NULL);
+				if (valObj)
+					MakeTwitch(valObj, kTwitchPreset_PadlockWiggle);
+				MakeTextInputValueObj(gNav->menuRow);
+				return;
+			}
+		}
+
+		SDL_snprintf(buf, (size_t)maxLen, "%d.%d.%d.%d", vals[0], vals[1], vals[2], vals[3]);
+		PlayConfirmEffect();
+		SetTextInputActive(false);
+		gNav->menuState = kMenuStateReady;
+		InvalidateAllInputs();
+		MakeTextInputValueObj(gNav->menuRow);
+		TwitchOutSelection();
+		if (entry->callback)
+			entry->callback(entry);
+		return;
+	}
+
+	if (GetNewKeyState(SDL_SCANCODE_BACKSPACE))
+	{
+		sIPJustAutoAdvanced = false;
+		if (sIPOctetUntouched[sIPCurOctet])
+		{
+			sIPOctets[sIPCurOctet][0] = '\0';
+			sIPOctetUntouched[sIPCurOctet] = false;
+			changed = true;
+		}
+		else
+		{
+			int len = (int)SDL_strlen(sIPOctets[sIPCurOctet]);
+			if (len > 0)
+			{
+				sIPOctets[sIPCurOctet][len - 1] = '\0';
+				changed = true;
+			}
+			else if (sIPCurOctet > 0)
+			{
+				sIPCurOctet--;
+				changed = true;
+			}
+		}
+	}
+
+	if (GetNewKeyState(SDL_SCANCODE_LEFT))
+	{
+		sIPJustAutoAdvanced = false;
+		if (sIPOctets[sIPCurOctet][0] != '\0' && sIPCurOctet > 0)
+		{
+			sIPCurOctet--;
+			changed = true;
+		}
+		else
+		{
+			PlayEffect(EFFECT_BADSELECT);
+		}
+	}
+
+	if (GetNewKeyState(SDL_SCANCODE_RIGHT) || GetNewKeyState(SDL_SCANCODE_TAB))
+	{
+		sIPJustAutoAdvanced = false;
+		if (sIPOctets[sIPCurOctet][0] != '\0' && sIPCurOctet < 3)
+		{
+			sIPCurOctet++;
+			changed = true;
+		}
+		else
+		{
+			PlayEffect(EFFECT_BADSELECT);
+		}
+	}
+
+	for (int i = 0; gTextInput[i] != '\0'; i++)
+	{
+		char c = gTextInput[i];
+		if (c >= '0' && c <= '9')
+		{
+			sIPJustAutoAdvanced = false;
+			char* oct = sIPOctets[sIPCurOctet];
+			if (sIPOctetUntouched[sIPCurOctet])
+			{
+				oct[0] = c;
+				oct[1] = '\0';
+				sIPOctetUntouched[sIPCurOctet] = false;
+				changed = true;
+			}
+			else if (oct[0] == '0' && oct[1] == '\0')
+			{
+				oct[0] = c;
+				changed = true;
+			}
+			else
+			{
+				int len = (int)SDL_strlen(oct);
+				int curVal = len > 0 ? ParseDecimalInt(oct) : 0;
+				int nextVal = curVal * 10 + (c - '0');
+				if (len < 3 && nextVal <= 255)
+				{
+					oct[len] = c;
+					oct[len + 1] = '\0';
+					changed = true;
+				}
+				else
+				{
+					PlayEffect(EFFECT_BADSELECT);
+					continue;
+				}
+			}
+
+			int finalLen = (int)SDL_strlen(oct);
+			int finalVal = ParseDecimalInt(oct);
+			if (sIPCurOctet < 3 && (finalLen == 3 || (finalVal > 0 && finalVal * 10 > 255)))
+			{
+				sIPCurOctet++;
+				sIPJustAutoAdvanced = true;
+			}
+		}
+		else if (c == '.' || c == ' ')
+		{
+			if (sIPJustAutoAdvanced)
+			{
+				sIPJustAutoAdvanced = false;
+				continue;
+			}
+			if (sIPOctets[sIPCurOctet][0] != '\0' && sIPCurOctet < 3)
+			{
+				sIPCurOctet++;
+				changed = true;
+			}
+			else
+			{
+				PlayEffect(EFFECT_BADSELECT);
+			}
+		}
+		else
+		{
+			PlayEffect(EFFECT_BADSELECT);
+		}
+	}
+
+	if (changed)
+	{
+		gNav->idleTime = 0;
+		MakeTextInputValueObj(gNav->menuRow);
 	}
 }
 
@@ -1395,6 +1655,12 @@ static void AwaitTextInput(void)
 	{
 		SetTextInputActive(false);
 		gNav->menuState = kMenuStateReady;
+		return;
+	}
+
+	if (entry->textInput.ipOnly)
+	{
+		HandleIPTextInput(entry);
 		return;
 	}
 
@@ -1431,19 +1697,11 @@ static void AwaitTextInput(void)
 	for (int i = 0; gTextInput[i] != '\0' && curLen < (maxLen - 1); i++)
 	{
 		char c = gTextInput[i];
-		if (!entry->textInput.ipOnly && c >= 'a' && c <= 'z')
+		if (c >= 'a' && c <= 'z')
 			c = (char)('A' + (c - 'a'));
 
-		Boolean allowed = false;
-		if (entry->textInput.ipOnly)
-		{
-			allowed = ((c >= '0' && c <= '9') || c == '.' || c == ':');
-		}
-		else
-		{
-			allowed = ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
-			           c == ' ' || c == '.' || c == '-' || c == '_');
-		}
+		Boolean allowed = ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+		                   c == ' ' || c == '.' || c == '-' || c == '_');
 
 		if (allowed)
 		{
@@ -1885,6 +2143,18 @@ static ObjNode* LayOutCycler1(int row)
 
 	ObjNode* node = MakeText(buf, row, 0, 0);
 	node->MoveCall = MoveAction;
+
+	float baseScale = GetMenuItemHeight(row) * gNav->style.standardScale;
+	node->Scale = (OGLVector3D) { baseScale, baseScale, baseScale };
+	OGLRect extents = TextMesh_GetExtents(node);
+	float width = extents.right - extents.left;
+	const float kMaxCyclerWidth = 400.0f;
+	if (width > kMaxCyclerWidth && width > 1.0f)
+	{
+		float clampedScale = baseScale * (kMaxCyclerWidth / width);
+		node->Scale = (OGLVector3D) { clampedScale, clampedScale, clampedScale };
+	}
+	UpdateObjectTransforms(node);
 
 	return node;
 }

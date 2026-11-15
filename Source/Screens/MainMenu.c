@@ -121,7 +121,7 @@ static const MenuItem gMainMenuTree[] =
 	{ .id='netg' },
 	{kMITextInput, STR_PLAYER_NAME, .textInput={ gGamePrefs.playerName, (int)sizeof(gGamePrefs.playerName), false } },
 	{
-		kMICycler1, STR_LOCAL_PLAYERS, .callback=OnPickNetLocalPlayers, .cycler=
+		kMICycler1, STR_LOCAL_PLAYERS, .callback=OnPickNetLocalPlayers, .customHeight=0.72f, .cycler=
 		{
 			.valuePtr=&sNetLocalPlayersChoice, .choices=
 			{

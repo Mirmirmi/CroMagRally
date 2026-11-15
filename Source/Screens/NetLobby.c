@@ -265,7 +265,7 @@ static const MenuItem gJoinBrowserMenuTree[] =
 	{kMIPick, STR_NULL, .id=103, .next='EXIT', .callback=OnPickDiscoveredHost, .getDynamicText=GetDiscoveredHostText, .getLayoutFlags=IsDiscoveredHostHidden },
 	{kMISpacer, .customHeight=0.5f, .getLayoutFlags=IsDirectIPFallbackHidden },
 	{kMILabel, STR_TRY_DIRECT_CONNECTION, .customHeight=0.55f, .getLayoutFlags=IsDirectIPFallbackHidden },
-	{kMITextInput, STR_DIRECT_IP, .textInput={ sDirectIP, (int)sizeof(sDirectIP), true }, .getLayoutFlags=IsDirectIPFallbackHidden },
+	{kMITextInput, STR_DIRECT_IP, .textInput={ sDirectIP, (int)sizeof(sDirectIP), true }, .customHeight=0.75f, .getLayoutFlags=IsDirectIPFallbackHidden },
 	{kMIPick, STR_CONNECT_TO_IP, .id=2, .next='EXIT', .getLayoutFlags=IsDirectIPFallbackHidden },
 	{kMIPick, STR_CANCEL,        .id=0, .next='EXIT' },
 	{ .type=kMISENTINEL }
@@ -380,13 +380,16 @@ static void UpdateClientWaitMenu(void)
 
 Boolean SetupNetworkJoin(void)
 {
+	sJoinSearchStartMs = SDL_GetTicks();
+	sShowDirectIPFallback = false;
+
 	while (true)
 	{
 		sUINumHosts = 0;
 		sPickedHostIdx = -1;
 		sLastRenderedHosts = 0;
-		sJoinSearchStartMs = SDL_GetTicks();
-		sShowDirectIPFallback = false;
+		if (!sShowDirectIPFallback)
+			sJoinSearchStartMs = SDL_GetTicks();
 
 		Net_StartClientDiscovery();
 		SetupNetLobbyView();
