@@ -728,9 +728,9 @@ ObjNode	*obj;
 		{
 			o = gPlayerInfo[p].tagOccilation += gFramesPerSecondFrac * 2.0f;
 
-			gTagColor.r = r = fabs(sin(o));
-			gTagColor.g = g = fabs(cos(o));
-			gTagColor.b = b = fabs(tan(o));
+			gTagColor.r = r = fminf(1.0f, (float)fabs(sin(o)));
+			gTagColor.g = g = fminf(1.0f, (float)fabs(cos(o)));
+			gTagColor.b = b = fminf(1.0f, (float)fabs(tan(o)));
 
 			obj = gPlayerInfo[p].objNode;
 			while(obj)

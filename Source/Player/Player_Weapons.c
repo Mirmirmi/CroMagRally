@@ -908,7 +908,7 @@ ObjNode		*who = (ObjNode *)theNode->WhoThrew;
 	if (theNode->EffectChannel != -1)
 		Update3DSoundChannel(EFFECT_BIRDCAW, &theNode->EffectChannel, &gCoord);
 	else
-		theNode->EffectChannel = PlayEffect_Parms3DSynced(EFFECT_BIRDCAW, &gCoord, NORMAL_CHANNEL_RATE, 1.0);
+		theNode->EffectChannel = PlayEffect_Parms3D(EFFECT_BIRDCAW, &gCoord, NORMAL_CHANNEL_RATE, 1.0);
 
 }
 
@@ -1167,8 +1167,24 @@ void UpdateClientProjectileTrail(ObjNode *theNode)
 	float		fps = gFramesPerSecondFrac;
 	OGLPoint3D	bubblePt;
 
-	if (!theNode || (theNode->StatusBits & STATUS_BIT_HIDDEN))
+	if (!theNode)
 		return;
+
+	if (theNode->StatusBits & STATUS_BIT_HIDDEN)
+	{
+		if (theNode->EffectChannel != -1)
+			StopAChannel(&theNode->EffectChannel);
+		return;
+	}
+
+	if (theNode->Genre == SKELETON_GENRE && theNode->Type == SKELETON_TYPE_BIRDBOMB)
+	{
+		if (theNode->EffectChannel != -1)
+			Update3DSoundChannel(EFFECT_BIRDCAW, &theNode->EffectChannel, &theNode->Coord);
+		else
+			theNode->EffectChannel = PlayEffect_Parms3D(EFFECT_BIRDCAW, &theNode->Coord, NORMAL_CHANNEL_RATE, 1.0f);
+		return;
+	}
 
 	switch (theNode->Type)
 	{
@@ -1198,6 +1214,10 @@ void UpdateClientProjectileTrail(ObjNode *theNode)
 				theNode->ParticleTimer += .03f;
 				MakeBubbles(theNode, &bubblePt, .15, 2.5);
 			}
+			if (theNode->EffectChannel != -1)
+				Update3DSoundChannel(EFFECT_HUM, &theNode->EffectChannel, &theNode->Coord);
+			else
+				theNode->EffectChannel = PlayEffect_Parms3D(EFFECT_HUM, &theNode->Coord, NORMAL_CHANNEL_RATE + 0x2000, 1.0f);
 			break;
 	}
 }

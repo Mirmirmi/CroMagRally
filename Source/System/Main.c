@@ -1103,7 +1103,8 @@ void MoveEverything(void)
 	if (gIsNetworkClient)
 		Net_ClientUpdateVisualFrame();			// sync client transforms BEFORE camera & skid updates
 	UpdateCameras(false, false);				// update cameras for ALL players
-	CalcPlayerPlaces();							// determinw who is in what place
+	if (!gIsNetworkClient)
+		CalcPlayerPlaces();						// determine who is in what place (host-authoritative in LAN)
 	UpdateSkidMarks();							// update skid marks
 	UpdateLiquidAnimation();					// update liquid animation
 

@@ -14,12 +14,30 @@ extern "C" {
 
 #define NET_DEFAULT_PORT        29400
 #define NET_DISCOVERY_PORT      29401
-#define NET_PROTOCOL_VERSION    4
+#define NET_PROTOCOL_VERSION    5
 #define NET_MAGIC               0x434D524Eu /* 'CMRN' */
 #define NET_MAX_DISCOVERED_HOSTS 16
-#define NET_MAX_PROJECTILES     24
+#define NET_MAX_PROJECTILES     64
 #define NET_MAX_TORCHES         12
 #define NET_MAX_NAME_LEN        32
+
+typedef enum NetPlayerSnapFlags
+{
+	kPlayerSnapFlag_IsIt         = 1 << 0,
+	kPlayerSnapFlag_Eliminated   = 1 << 1,
+	kPlayerSnapFlag_RaceComplete = 1 << 2,
+	kPlayerSnapFlag_IsComputer   = 1 << 3,
+	kPlayerSnapFlag_OnWater      = 1 << 4,
+	kPlayerSnapFlag_IsPlaning    = 1 << 5,
+	kPlayerSnapFlag_GasDown      = 1 << 6,
+	kPlayerSnapFlag_Braking      = 1 << 7,
+	kPlayerSnapFlag_WrongWay     = 1 << 8,
+	kPlayerSnapFlag_MakingSkid   = 1 << 9,
+	kPlayerSnapFlag_SubMarine    = 1 << 10,
+	kPlayerSnapFlag_OnGround     = 1 << 11,
+	kPlayerSnapFlag_ThrowFwd     = 1 << 12,
+	kPlayerSnapFlag_ThrowBack    = 1 << 13
+} NetPlayerSnapFlags;
 
 typedef enum NetChannelID
 {

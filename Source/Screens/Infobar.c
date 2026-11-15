@@ -875,7 +875,13 @@ static void Infobar_DrawMap(Byte whichPane)
 					break;
 
 			default:
-					gGlobalColorFilter = kCavemanSkinColors[gPlayerInfo[i].skin];
+			{
+				int skin = gPlayerInfo[i].skin;
+				if (skin < 0 || skin >= NUM_CAVEMAN_SKINS)
+					skin = 0;
+				gGlobalColorFilter = kCavemanSkinColors[skin];
+				break;
+			}
 		}
 
 		

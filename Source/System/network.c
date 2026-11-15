@@ -31,22 +31,6 @@
 /*     CONSTANTS      */
 /**********************/
 
-enum
-{
-	kPlayerSnapFlag_IsIt         = 1 << 0,
-	kPlayerSnapFlag_Eliminated   = 1 << 1,
-	kPlayerSnapFlag_RaceComplete = 1 << 2,
-	kPlayerSnapFlag_IsComputer   = 1 << 3,
-	kPlayerSnapFlag_OnWater      = 1 << 4,
-	kPlayerSnapFlag_IsPlaning    = 1 << 5,
-	kPlayerSnapFlag_GasDown      = 1 << 6,
-	kPlayerSnapFlag_Braking      = 1 << 7,
-	kPlayerSnapFlag_WrongWay     = 1 << 8,
-	kPlayerSnapFlag_MakingSkid   = 1 << 9,
-	kPlayerSnapFlag_SubMarine    = 1 << 10,
-	kPlayerSnapFlag_OnGround     = 1 << 11
-};
-
 #define DISCOVERY_PRUNE_MS       3500u
 #define DISCOVERY_INTERVAL_MS    450u
 #define SNAPSHOT_INTERVAL_MS     13u    /* ~75 Hz max snapshot rate (avoids 60Hz aliasing) */
@@ -140,6 +124,7 @@ static NetWeaponTracker sClientWeapons[NET_MAX_PROJECTILES];
 static Boolean          sMatchLost = false;
 static uint32_t         sLastSnapRecvMs = 0;
 static Boolean          sClientAnnouncedPOW[MAX_POW_TYPES];
+static uint8_t          sClientPrevThrowMask[MAX_PLAYERS];
 
 /**********************/
 /*  INTERNAL HELPERS  */
@@ -873,6 +858,7 @@ static void ApplySnapshotToClientWorld(const NetHostSnapshotMsg* snap)
 		pi->flamingTimer = ps->flamingTimer;
 		pi->submarineImmobilized = ps->submarineImmobilized;
 		pi->health = (float)ps->health / 100.0f;
+		int prevLap = pi->lapNum;
 		pi->powType = ps->powType;
 		pi->powQuantity = ps->powQuantity;
 		pi->lapNum = ps->lapNum;
@@ -888,7 +874,26 @@ static void ApplySnapshotToClientWorld(const NetHostSnapshotMsg* snap)
 		pi->gasPedalDown = (ps->flags & kPlayerSnapFlag_GasDown) != 0;
 		pi->braking      = (ps->flags & kPlayerSnapFlag_Braking) != 0;
 		pi->wrongWay     = (ps->flags & kPlayerSnapFlag_WrongWay) != 0;
-		pi->makingSkid   = (ps->flags & kPlayerSnapFlag_MakingSkid) != 0;
+		/* Leave pi->makingSkid under local UpdateTireSkidMarks control so EFFECT_SKID triggers on new skids */
+
+		if (gIsInGame && !pi->raceComplete && pi->onThisMachine && !pi->isComputer &&
+		    prevLap >= 0 && ps->lapNum > prevLap && ps->lapNum > 0 && ps->lapNum < gNumLapsThisRace)
+		{
+			ShowLapNum((short)i);
+		}
+
+		uint8_t throwMask = (uint8_t)((ps->flags & (kPlayerSnapFlag_ThrowFwd | kPlayerSnapFlag_ThrowBack)) >> 12);
+		if (pi->headObj && pi->headObj->Skeleton)
+		{
+			if (throwMask != 0 && throwMask != sClientPrevThrowMask[i])
+			{
+				short throwAnim = (ps->flags & kPlayerSnapFlag_ThrowFwd)
+					? PLAYER_ANIM_THROWFORWARD : PLAYER_ANIM_THROWBACKWARD;
+				pi->headObj->HEAD_THROW_READY_FLAG = false;
+				MorphToSkeletonAnim(pi->headObj->Skeleton, throwAnim, 8.0f);
+			}
+			sClientPrevThrowMask[i] = throwMask;
+		}
 
 		ObjNode* car = pi->objNode;
 		if (car)
@@ -1382,6 +1387,7 @@ void Net_ResetGameSyncState(void)
 	sMatchLost = false;
 	sLastSnapRecvMs = 0;
 	memset(sClientAnnouncedPOW, 0, sizeof(sClientAnnouncedPOW));
+	memset(sClientPrevThrowMask, 0, sizeof(sClientPrevThrowMask));
 }
 
 void ShutdownNetworkManager(void)
@@ -2272,6 +2278,13 @@ void HostSend_ControlInfoToClients(void)
 		if (pi->makingSkid)   flags |= kPlayerSnapFlag_MakingSkid;
 		if (car && (car->StatusBits & STATUS_BIT_ONGROUND))
 			flags |= kPlayerSnapFlag_OnGround;
+		if (pi->headObj && pi->headObj->Skeleton)
+		{
+			if (pi->headObj->Skeleton->AnimNum == PLAYER_ANIM_THROWFORWARD)
+				flags |= kPlayerSnapFlag_ThrowFwd;
+			else if (pi->headObj->Skeleton->AnimNum == PLAYER_ANIM_THROWBACKWARD)
+				flags |= kPlayerSnapFlag_ThrowBack;
+		}
 		ps->flags = flags;
 	}
 
@@ -2528,22 +2541,60 @@ void Net_HostSendElimination(short eliminatedPlayer)
 /* PROJECTILE TRACKING*/
 /**********************/
 
+static Boolean Net_IsStaticGroundHazard(const ObjNode* obj)
+{
+	return obj && obj->Group == MODEL_GROUP_WEAPONS &&
+		(obj->Type == WEAPONS_ObjType_OilPatch || obj->Type == WEAPONS_ObjType_LandMine);
+}
+
 void Net_RegisterWeaponObj(struct ObjNode* obj, uint8_t kind)
 {
 	if (!gIsNetworkHost || !obj)
 		return;
 
+	int freeIdx = -1;
+	int oldestHazardIdx = -1;
+	int oldestAnyIdx = -1;
+
 	for (int i = 0; i < NET_MAX_PROJECTILES; i++)
 	{
-		if (!sHostWeapons[i].active)
+		if (sHostWeapons[i].active)
 		{
-			sHostWeapons[i].active = true;
-			sHostWeapons[i].netId = sNextWeaponNetId++;
-			sHostWeapons[i].kind = kind;
-			sHostWeapons[i].obj = obj;
-			return;
+			if (!sHostWeapons[i].obj || IsObjectBeingDeleted(sHostWeapons[i].obj))
+			{
+				memset(&sHostWeapons[i], 0, sizeof(sHostWeapons[i]));
+				if (freeIdx < 0)
+					freeIdx = i;
+				continue;
+			}
+			if (sHostWeapons[i].obj == obj)
+				return;
+
+			if (Net_IsStaticGroundHazard(sHostWeapons[i].obj))
+			{
+				if (oldestHazardIdx < 0 || sHostWeapons[i].netId < sHostWeapons[oldestHazardIdx].netId)
+					oldestHazardIdx = i;
+			}
+			if (oldestAnyIdx < 0 || sHostWeapons[i].netId < sHostWeapons[oldestAnyIdx].netId)
+				oldestAnyIdx = i;
+		}
+		else if (freeIdx < 0)
+		{
+			freeIdx = i;
 		}
 	}
+
+	/* Evict oldest static ground hazard (or oldest entry) so newly fired items never drop mid-match */
+	int slot = freeIdx;
+	if (slot < 0)
+		slot = (oldestHazardIdx >= 0) ? oldestHazardIdx : oldestAnyIdx;
+	if (slot < 0)
+		return;
+
+	sHostWeapons[slot].active = true;
+	sHostWeapons[slot].netId = sNextWeaponNetId++;
+	sHostWeapons[slot].kind = kind;
+	sHostWeapons[slot].obj = obj;
 }
 
 void Net_UnregisterWeaponObj(struct ObjNode* obj)
