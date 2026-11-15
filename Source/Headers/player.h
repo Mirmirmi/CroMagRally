@@ -41,6 +41,14 @@ enum
 	CAR_TYPE_OBELISK,
 	CAR_TYPE_CATAPULT,
 	CAR_TYPE_CHARIOT,
+	CAR_TYPE_POLICE,
+	CAR_TYPE_FIRETRUCK,
+	CAR_TYPE_RESCUE_ATV,
+	CAR_TYPE_HELICOPTER,
+	CAR_TYPE_SCOOTER,
+	CAR_TYPE_BULLDOZER,
+	CAR_TYPE_HOVERCRAFT,
+	CAR_TYPE_RECYCLING_TRUCK,
 
 	NUM_LAND_CAR_TYPES,
 
@@ -348,4 +356,11 @@ void UpdateSkidMarks(void);
 void StretchSkidMark(ObjNode *owner, short subID, float x, float z, float dx, float dz);
 void DetachOwnerFromSkid(ObjNode *owner);
 void MakeSkidSmoke(short p, OGLPoint3D *coord);
+
+		/* PAW PATROL TOGGLES */
+
+Boolean IsPawPatrolEnabled(void);
+Boolean IsPawPatrolCPUEnabled(void);
+Boolean IsPawPatrolVehicleType(short carType);
+Boolean IsPawPatrolCharacterType(int sex);
 

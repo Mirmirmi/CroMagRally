@@ -437,24 +437,33 @@ static void PollHostDiscoverySocket(void)
 	NetDiscoveryBeaconPacket beacon;
 	BuildBeaconPacket(&beacon);
 
-	/* Receive any probes and reply directly */
-	for (;;)
+	/* Receive any probes and reply directly (bounded per frame; full buffer avoids beacon truncation) */
+	for (int iter = 0; iter < 32; iter++)
 	{
-		NetDiscoveryProbePacket probe;
+		uint8_t rxBuf[256];
 		struct sockaddr_in fromAddr;
 		socklen_t fromLen = sizeof(fromAddr);
-		int n = (int)recvfrom(sHostDiscoverySock, (char*)&probe, sizeof(probe), 0,
+		int n = (int)recvfrom(sHostDiscoverySock, (char*)rxBuf, sizeof(rxBuf), 0,
 		                      (struct sockaddr*)&fromAddr, &fromLen);
 		if (n <= 0)
 			break;
 
-		if (n == (int)sizeof(probe) && probe.magic == NET_MAGIC && probe.version == NET_PROTOCOL_VERSION)
+		/* Never reply to packets originating from the discovery port itself (prevents self/host echo loops) */
+		if (ntohs(fromAddr.sin_port) == sDiscoveryPort)
+			continue;
+
+		if (n == (int)sizeof(NetDiscoveryProbePacket))
 		{
-			uint32_t fromIP = ntohl(fromAddr.sin_addr.s_addr);
-			if (Net_IsLANAddress(fromIP))
+			NetDiscoveryProbePacket probe;
+			memcpy(&probe, rxBuf, sizeof(probe));
+			if (probe.magic == NET_MAGIC && probe.version == NET_PROTOCOL_VERSION)
 			{
-				sendto(sHostDiscoverySock, (const char*)&beacon, sizeof(beacon), 0,
-				       (struct sockaddr*)&fromAddr, fromLen);
+				uint32_t fromIP = ntohl(fromAddr.sin_addr.s_addr);
+				if (Net_IsLANAddress(fromIP))
+				{
+					sendto(sHostDiscoverySock, (const char*)&beacon, sizeof(beacon), 0,
+					       (struct sockaddr*)&fromAddr, fromLen);
+				}
 			}
 		}
 	}
@@ -1647,18 +1656,20 @@ void Net_PollDiscovery(void)
 		sendto(sClientDiscoverySock, (const char*)&probe, sizeof(probe), 0, (struct sockaddr*)&dest, sizeof(dest));
 	}
 
-	for (;;)
+	for (int iter = 0; iter < 32; iter++)
 	{
-		NetDiscoveryBeaconPacket beacon;
+		uint8_t rxBuf[256];
 		struct sockaddr_in fromAddr;
 		socklen_t fromLen = sizeof(fromAddr);
-		int n = (int)recvfrom(sClientDiscoverySock, (char*)&beacon, sizeof(beacon), 0,
+		int n = (int)recvfrom(sClientDiscoverySock, (char*)rxBuf, sizeof(rxBuf), 0,
 		                      (struct sockaddr*)&fromAddr, &fromLen);
 		if (n <= 0)
 			break;
 
-		if (n == (int)sizeof(beacon))
+		if (n == (int)sizeof(NetDiscoveryBeaconPacket))
 		{
+			NetDiscoveryBeaconPacket beacon;
+			memcpy(&beacon, rxBuf, sizeof(beacon));
 			uint32_t ipHostOrder = ntohl(fromAddr.sin_addr.s_addr);
 			UpsertDiscoveredHost(ipHostOrder, &beacon);
 		}

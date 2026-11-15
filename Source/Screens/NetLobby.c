@@ -12,13 +12,16 @@
 /*   STATIC STATE     */
 /**********************/
 
-#define MAX_UI_DISCOVERED_ROWS 4
+#define MAX_UI_DISCOVERED_ROWS      4
+#define DIRECT_IP_FALLBACK_DELAY_MS 30000ULL
 
 static char                   sDirectIP[32] = "127.0.0.1";
 static char                   sDynamicTextBuf[8][96];
 static NetDiscoveredHostInfo  sUIHosts[NET_MAX_DISCOVERED_HOSTS];
 static int                    sUINumHosts = 0;
 static int                    sPickedHostIdx = -1;
+static Uint64                 sJoinSearchStartMs = 0;
+static Boolean                sShowDirectIPFallback = false;
 
 static int                    sLastRenderedPlayers = -1;
 static int                    sLastRenderedHosts = -1;
@@ -178,7 +181,7 @@ static const MenuItem gHostLobbyMenuTree[] =
 		}
 	},
 	{
-		kMICycler2, STR_CPU_PLAYERS, .callback=OnHostSettingChanged, .cycler=
+		kMICycler1, STR_CPU_PLAYERS, .callback=OnHostSettingChanged, .cycler=
 		{
 			.valuePtr=&gMultiplayerCPUs, .choices=
 			{
@@ -188,7 +191,7 @@ static const MenuItem gHostLobbyMenuTree[] =
 		}
 	},
 	{
-		kMICycler2, STR_DIFFICULTY, .callback=OnHostSettingChanged, .cycler=
+		kMICycler1, STR_DIFFICULTY, .callback=OnHostSettingChanged, .cycler=
 		{
 			.valuePtr=&gGamePrefs.difficulty, .choices=
 			{
@@ -199,7 +202,9 @@ static const MenuItem gHostLobbyMenuTree[] =
 			}
 		}
 	},
-	{kMISpacer, .customHeight=0.5f },
+	{kMISpacer, .customHeight=0.35f },
+	{kMILabel, STR_WAIT_FOR_PLAYERS_OR_START, .customHeight=0.55f },
+	{kMISpacer, .customHeight=0.25f },
 	{kMIPick, STR_CHANGE_TRACK, .id=2, .next='EXIT' },
 	{kMIPick, STR_START_MATCH,  .id=1, .next='EXIT' },
 	{kMIPick, STR_CANCEL,       .id=0, .next='EXIT' },
@@ -336,6 +341,12 @@ static void OnPickDiscoveredHost(const MenuItem* mi)
 	sPickedHostIdx = mi->id - 100;
 }
 
+static int IsDirectIPFallbackHidden(const MenuItem* mi)
+{
+	(void)mi;
+	return sShowDirectIPFallback ? 0 : (kMILayoutFlagHidden | kMILayoutFlagDisabled);
+}
+
 static const MenuItem gJoinBrowserMenuTree[] =
 {
 	{ .id='join' },
@@ -346,9 +357,10 @@ static const MenuItem gJoinBrowserMenuTree[] =
 	{kMIPick, STR_NULL, .id=101, .next='EXIT', .callback=OnPickDiscoveredHost, .getDynamicText=GetDiscoveredHostText, .getLayoutFlags=IsDiscoveredHostHidden },
 	{kMIPick, STR_NULL, .id=102, .next='EXIT', .callback=OnPickDiscoveredHost, .getDynamicText=GetDiscoveredHostText, .getLayoutFlags=IsDiscoveredHostHidden },
 	{kMIPick, STR_NULL, .id=103, .next='EXIT', .callback=OnPickDiscoveredHost, .getDynamicText=GetDiscoveredHostText, .getLayoutFlags=IsDiscoveredHostHidden },
-	{kMISpacer, .customHeight=0.5f },
-	{kMITextInput, STR_DIRECT_IP, .textInput={ sDirectIP, (int)sizeof(sDirectIP), true } },
-	{kMIPick, STR_CONNECT_TO_IP, .id=2, .next='EXIT' },
+	{kMISpacer, .customHeight=0.5f, .getLayoutFlags=IsDirectIPFallbackHidden },
+	{kMILabel, STR_TRY_DIRECT_CONNECTION, .customHeight=0.55f, .getLayoutFlags=IsDirectIPFallbackHidden },
+	{kMITextInput, STR_DIRECT_IP, .textInput={ sDirectIP, (int)sizeof(sDirectIP), true }, .customHeight=0.75f, .getLayoutFlags=IsDirectIPFallbackHidden },
+	{kMIPick, STR_CONNECT_TO_IP, .id=2, .next='EXIT', .getLayoutFlags=IsDirectIPFallbackHidden },
 	{kMIPick, STR_CANCEL,        .id=0, .next='EXIT' },
 	{ .type=kMISENTINEL }
 };
@@ -362,16 +374,32 @@ static void UpdateJoinBrowserMenu(void)
 	if (newCount > MAX_UI_DISCOVERED_ROWS)
 		newCount = MAX_UI_DISCOVERED_ROWS;
 
+	Uint64 nowMs = SDL_GetTicks();
+	Boolean needRelayout = false;
+
+	if (newCount > 0)
+	{
+		sJoinSearchStartMs = nowMs;
+	}
+	else if (!sShowDirectIPFallback && (nowMs - sJoinSearchStartMs) >= DIRECT_IP_FALLBACK_DELAY_MS)
+	{
+		sShowDirectIPFallback = true;
+		needRelayout = true;
+	}
+
 	if (newCount != sLastRenderedHosts)
 	{
 		sUINumHosts = newCount;
 		sLastRenderedHosts = newCount;
-		LayoutCurrentMenuAgain();
+		needRelayout = true;
 	}
 	else
 	{
 		sUINumHosts = newCount;
 	}
+
+	if (needRelayout)
+		LayoutCurrentMenuAgain();
 }
 
 /**********************/
@@ -469,11 +497,16 @@ static int RunClientWaitRoom(void)
 
 Boolean SetupNetworkJoin(void)
 {
+	sJoinSearchStartMs = SDL_GetTicks();
+	sShowDirectIPFallback = false;
+
 	while (true)
 	{
 		sUINumHosts = 0;
 		sPickedHostIdx = -1;
 		sLastRenderedHosts = 0;
+		if (!sShowDirectIPFallback)
+			sJoinSearchStartMs = SDL_GetTicks();
 
 		Net_StartClientDiscovery();
 		SetupNetLobbyView();

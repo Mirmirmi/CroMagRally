@@ -124,6 +124,14 @@ const UserPhysics kDefaultPhysics =
 		[CAR_TYPE_OBELISK]		= {{5, 3, 6, 7}},
 		[CAR_TYPE_CATAPULT]		= {{6, 7, 5, 4}},
 		[CAR_TYPE_CHARIOT]		= {{7, 7, 4, 3}},
+		[CAR_TYPE_POLICE]			= {{7, 7, 5, 4}},
+		[CAR_TYPE_FIRETRUCK]		= {{7, 7, 5, 4}},
+		[CAR_TYPE_RESCUE_ATV]		= {{7, 7, 5, 4}},
+		[CAR_TYPE_HELICOPTER]		= {{7, 7, 5, 4}},
+		[CAR_TYPE_SCOOTER]			= {{7, 7, 5, 4}},
+		[CAR_TYPE_BULLDOZER]		= {{7, 7, 5, 4}},
+		[CAR_TYPE_HOVERCRAFT]		= {{7, 7, 5, 4}},
+		[CAR_TYPE_RECYCLING_TRUCK]	= {{7, 7, 5, 4}},
 		[CAR_TYPE_LIZARD]		= {{5, 4, 5, 4}},
 		[CAR_TYPE_SUB]			= {{0, 7, 0, 0}},
 	},
@@ -152,6 +160,14 @@ const UserPhysics kiOSPhysicsConsts =
 		[CAR_TYPE_OBELISK]		= {{6, 2, 7, 5}},
 		[CAR_TYPE_CATAPULT]		= {{6, 3, 4, 2}},
 		[CAR_TYPE_CHARIOT]		= {{6, 4, 3, 1}},
+		[CAR_TYPE_POLICE]			= {{7, 5, 5, 3}},
+		[CAR_TYPE_FIRETRUCK]		= {{7, 5, 5, 3}},
+		[CAR_TYPE_RESCUE_ATV]		= {{7, 5, 5, 3}},
+		[CAR_TYPE_HELICOPTER]		= {{7, 5, 5, 3}},
+		[CAR_TYPE_SCOOTER]			= {{7, 5, 5, 3}},
+		[CAR_TYPE_BULLDOZER]		= {{7, 5, 5, 3}},
+		[CAR_TYPE_HOVERCRAFT]		= {{7, 5, 5, 3}},
+		[CAR_TYPE_RECYCLING_TRUCK]	= {{7, 5, 5, 3}},
 		[CAR_TYPE_SUB]			= {{0, 1, 0, 0}},
 	},
 };
@@ -212,6 +228,14 @@ static const float bottomOffsets[NUM_LAND_CAR_TYPES] =
 	[CAR_TYPE_OBELISK]     = -107,
 	[CAR_TYPE_CATAPULT]    = -77,
 	[CAR_TYPE_CHARIOT]     = -100,
+	[CAR_TYPE_POLICE]      = -75,
+	[CAR_TYPE_FIRETRUCK]   = -75,
+	[CAR_TYPE_RESCUE_ATV]  = -75,
+	[CAR_TYPE_HELICOPTER]  = -75,
+	[CAR_TYPE_SCOOTER]     = -75,
+	[CAR_TYPE_BULLDOZER]   = -75,
+	[CAR_TYPE_HOVERCRAFT]  = -75,
+	[CAR_TYPE_RECYCLING_TRUCK] = -75,
 };
 
 static const float shadowScale[NUM_LAND_CAR_TYPES] =
@@ -227,6 +251,14 @@ static const float shadowScale[NUM_LAND_CAR_TYPES] =
 	[CAR_TYPE_OBELISK]     = 11.0,
 	[CAR_TYPE_CATAPULT]    = 9.0,
 	[CAR_TYPE_CHARIOT]     = 10.0,
+	[CAR_TYPE_POLICE]      = 11.0,
+	[CAR_TYPE_FIRETRUCK]   = 11.0,
+	[CAR_TYPE_RESCUE_ATV]  = 8.5,
+	[CAR_TYPE_HELICOPTER]  = 11.0,
+	[CAR_TYPE_SCOOTER]     = 11.0,
+	[CAR_TYPE_BULLDOZER]   = 11.0,
+	[CAR_TYPE_HOVERCRAFT]  = 11.0,
+	[CAR_TYPE_RECYCLING_TRUCK] = 11.0,
 };
 
 static const int shadowTypes[NUM_LAND_CAR_TYPES] =
@@ -242,6 +274,14 @@ static const int shadowTypes[NUM_LAND_CAR_TYPES] =
 	[CAR_TYPE_OBELISK]     = SHADOW_TYPE_CAR_OBELISK,
 	[CAR_TYPE_CATAPULT]    = SHADOW_TYPE_CAR_CATAPULT,
 	[CAR_TYPE_CHARIOT]     = SHADOW_TYPE_CAR_CHARIOT,
+	[CAR_TYPE_POLICE]      = SHADOW_TYPE_CAR_CHARIOT,
+	[CAR_TYPE_FIRETRUCK]   = SHADOW_TYPE_CAR_CHARIOT,
+	[CAR_TYPE_RESCUE_ATV]  = SHADOW_TYPE_CAR_CHARIOT,
+	[CAR_TYPE_HELICOPTER]  = SHADOW_TYPE_CAR_CHARIOT,
+	[CAR_TYPE_SCOOTER]     = SHADOW_TYPE_CAR_CHARIOT,
+	[CAR_TYPE_BULLDOZER]   = SHADOW_TYPE_CAR_CHARIOT,
+	[CAR_TYPE_HOVERCRAFT]  = SHADOW_TYPE_CAR_CHARIOT,
+	[CAR_TYPE_RECYCLING_TRUCK] = SHADOW_TYPE_CAR_CHARIOT,
 };
 
 	carType = gPlayerInfo[playerNum].vehicleType;
@@ -502,6 +542,9 @@ long	oldLeft,oldRight,oldFront,oldBack,oldTop,oldBottom;
 	gFramesPerSecond = oldFPS;											// restore real FPS values
 	gFramesPerSecondFrac = oldFPSFrac;
 
+	if (gPlayerInfo[theNode->PlayerNum].vehicleType >= CAR_TYPE_POLICE &&
+		gPlayerInfo[theNode->PlayerNum].vehicleType < NUM_LAND_CAR_TYPES)
+		UpdatePoliceSirenLights(MODEL_GROUP_CARPARTS);
 
 }
 
@@ -2900,8 +2943,8 @@ ObjNode			*wheel,*link;
 		DoFatalAlert("CreateCarWheelsAndHead: playerNum >= MAX_PLAYERS");
 
 	sex = gPlayerInfo[playerNum].sex;							// get player sex
-	if (sex > 1)
-		DoFatalAlert("CreateCarWheelsAndHead: sx > 1");
+	if (sex >= NUM_PLAYER_CHARACTERS)
+		DoFatalAlert("CreateCarWheelsAndHead: sex out of range");
 
 	carType = gPlayerInfo[playerNum].vehicleType;				// get car type
 	GAME_ASSERT(carType < NUM_LAND_CAR_TYPES);
@@ -2948,6 +2991,7 @@ ObjNode			*wheel,*link;
 		.type		= SKELETON_TYPE_PLAYER_MALE + sex,
 		.coord		= {0,0,0},
 		.animNum	= PLAYER_ANIM_SIT,
+		.flags		= 0,
 		.slot		= theCar->Slot+1,
 		.scale		= BROG_SCALE,
 		.player		= playerNum,						// set playernum in this obj
@@ -2968,7 +3012,8 @@ ObjNode			*wheel,*link;
 			/************************/
 
 	int skinID = gPlayerInfo[playerNum].skin;
-	wheel->Skeleton->overrideTexture = gCavemanSkins[sex][skinID];
+	if (sex < 2)
+		wheel->Skeleton->overrideTexture = gCavemanSkins[sex][skinID];
 
 
 			/* ALIGN THEM */
@@ -3479,6 +3524,14 @@ static const OGLPoint3D	wheelOffsets[NUM_LAND_CAR_TYPES][4] =
 	[CAR_TYPE_OBELISK]     = { {-111,-58,-89},	{111,-58,-89},	{112,-38,79},	{-112,-38,79} },
 	[CAR_TYPE_CATAPULT]    = { {-108,-38,-109},	{108,-38,-109},	{112,-10,105},	{-112,-10,105} },
 	[CAR_TYPE_CHARIOT]     = { {-122,-28,-80},	{122,-28,-80},	{122,-2,85},	{-122,-2,85} },
+	[CAR_TYPE_POLICE]      = { {-104,-27,-160},	{104,-27,-160},	{100,-20,160},	{-100,-20,160} },
+	[CAR_TYPE_FIRETRUCK]   = { {-103,-20,-140},	{103,-20,-140},	{100,-20,155},	{-100,-20,155} },
+	[CAR_TYPE_RESCUE_ATV]  = { {-72,-29,-96},	{72,-29,-96},	{74,-29,96},	{-74,-29,96} },
+	[CAR_TYPE_HELICOPTER]  = { {-96,-31,-135},	{96,-31,-135},	{104,-31,135},	{-104,-31,135} },
+	[CAR_TYPE_SCOOTER]     = { {-82,-29,-142},	{82,-29,-142},	{96,-29,138},	{-96,-29,138} },
+	[CAR_TYPE_BULLDOZER]   = { {-102,-23,-125},	{102,-23,-125},	{102,-23,145},	{-102,-23,145} },
+	[CAR_TYPE_HOVERCRAFT]  = { {-94,-37,-130},	{94,-37,-130},	{98,-37,130},	{-98,-37,130} },
+	[CAR_TYPE_RECYCLING_TRUCK] = { {-102,-23,-135}, {102,-23,-135}, {102,-23,142}, {-102,-23,142} },
 	[CAR_TYPE_LIZARD]      = { {-92,-16,-78},	{92,-16,-78},	{86,-12,70},	{-86,-12,70} },
 };
 
@@ -3495,6 +3548,14 @@ static const OGLPoint3D	headOffsets[NUM_LAND_CAR_TYPES] =
 	[CAR_TYPE_OBELISK]     = { 0, 85, 22 },
 	[CAR_TYPE_CATAPULT]    = { 0, 85, 10 },
 	[CAR_TYPE_CHARIOT]     = { 0, 85, 10 },
+	[CAR_TYPE_POLICE]      = { 0, 42, 12 },
+	[CAR_TYPE_FIRETRUCK]   = { 0, 88, -42 },
+	[CAR_TYPE_RESCUE_ATV]  = { 0, 46, 16 },
+	[CAR_TYPE_HELICOPTER]  = { 0, 44, 5 },
+	[CAR_TYPE_SCOOTER]     = { 0, 62, 10 },
+	[CAR_TYPE_BULLDOZER]   = { 0, 60, -18 },
+	[CAR_TYPE_HOVERCRAFT]  = { 0, 58, 4 },
+	[CAR_TYPE_RECYCLING_TRUCK] = { 0, 62, -18 },
 	[CAR_TYPE_LIZARD]      = { 0, 74, 5 },
 };
 

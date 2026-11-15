@@ -56,6 +56,33 @@ static const char* GetBoneString(int n);
 /*********************/
 
 static int		gSelectedVehicleIndex;
+static int		gPawPatrolVehicleSkin = 0;
+
+static const short kPawPatrolVehicles[] =
+{
+	CAR_TYPE_POLICE,
+	CAR_TYPE_FIRETRUCK,
+	CAR_TYPE_RESCUE_ATV,
+	CAR_TYPE_HELICOPTER,
+	CAR_TYPE_SCOOTER,
+	CAR_TYPE_BULLDOZER,
+	CAR_TYPE_HOVERCRAFT,
+	CAR_TYPE_RECYCLING_TRUCK,
+};
+#define NUM_PAW_PATROL_VEHICLES	((int)(sizeof(kPawPatrolVehicles) / sizeof(kPawPatrolVehicles[0])))
+#define NUM_VEHICLE_SLOTS		(CAR_TYPE_POLICE + 1)
+
+static int GetNumVehicleSlots(void)
+{
+	return IsPawPatrolEnabled() ? NUM_VEHICLE_SLOTS : CAR_TYPE_POLICE;
+}
+
+static short GetEffectiveSelectedVehicle(void)
+{
+	if (gSelectedVehicleIndex == CAR_TYPE_POLICE)
+		return kPawPatrolVehicles[gPawPatrolVehicleSkin];
+	return gSelectedVehicleIndex;
+}
 static ObjNode	*gVehicleObj;
 static ObjNode	*gVehicleName;
 static ObjNode	*gBoneMeters[NUM_VEHICLE_PARAMETERS];
@@ -361,7 +388,7 @@ Boolean DoVehicleSelectScreen(short whichPlayer, Boolean allowAborting)
 
 		/* SET VEHICLE TYPE SELECTED */
 
-	gPlayerInfo[whichPlayer].vehicleType = gSelectedVehicleIndex;
+	gPlayerInfo[whichPlayer].vehicleType = GetEffectiveSelectedVehicle();
 
 	return(false);
 }
@@ -382,17 +409,20 @@ int					age;
 
 	gVehicleName = nil;
 	gSelectedVehicleIndex = 0;
+	gPawPatrolVehicleSkin = 0;
 
 	for (int i = 0; i < NUM_VEHICLE_PARAMETERS; i++)
 		gBoneMeters[i] = nil;
 
 	age = GetNumAgesCompleted();
-	if (age > 2)											// prevent extra cars after winning Iron Age
-		age = 2;
-	gNumVehiclesToChooseFrom = 7 + (age * 2);				// set # cars we can pick from
+	int maxLandCars = IsPawPatrolEnabled() ? NUM_LAND_CAR_TYPES : CAR_TYPE_POLICE;
+	if (age >= 3)											// completing Iron Age unlocks Police Cruiser
+		gNumVehiclesToChooseFrom = maxLandCars;
+	else
+		gNumVehiclesToChooseFrom = 7 + (age * 2);			// set # cars we can pick from
 
-	if ((gNumRealPlayers > 1) || IsBattleGameMode(gGameMode))	// let use any car in multiplayer/battle modes
-		gNumVehiclesToChooseFrom = NUM_LAND_CAR_TYPES;
+	if ((gNumRealPlayers > 1) || IsBattleGameMode(gGameMode) || gNetGameInProgress)	// let use any car in multiplayer/battle/net modes
+		gNumVehiclesToChooseFrom = maxLandCars;
 
 			/**************/
 			/* SETUP VIEW */
@@ -567,9 +597,10 @@ static void MakeVehicleName(void)
 	};
 
 	const char* nameStr = "???";
+	short carType = GetEffectiveSelectedVehicle();
 	if (gSelectedVehicleIndex < gNumVehiclesToChooseFrom)
 	{
-		nameStr = Localize(STR_CAR_MODEL_1 + gSelectedVehicleIndex);
+		nameStr = Localize(STR_CAR_MODEL_1 + carType);
 	}
 
 	gVehicleName = TextMesh_New(nameStr, kTextMeshAlignCenter, &def);
@@ -595,7 +626,7 @@ static void FreeVehicleSelectArt(void)
 static void UpdateSelectedVehicle(void)
 {
 
-	gVehicleObj->Type = gSelectedVehicleIndex;
+	gVehicleObj->Type = GetEffectiveSelectedVehicle();
 	ResetDisplayGroupObject(gVehicleObj);
 	MakeVehicleName();
 
@@ -619,7 +650,7 @@ static void UpdateSelectedVehicle(void)
 			/* SHOW/HIDE ARROWS, PADLOCK */
 
 	SetObjectVisible(gVehicleLeftArrow,		gSelectedVehicleIndex > 0);
-	SetObjectVisible(gVehicleRightArrow,	gSelectedVehicleIndex < NUM_LAND_CAR_TYPES-1);
+	SetObjectVisible(gVehicleRightArrow,	gSelectedVehicleIndex < GetNumVehicleSlots() - 1);
 	SetObjectVisible(gVehiclePadlock,		gSelectedVehicleIndex >= gNumVehiclesToChooseFrom);
 }
 
@@ -628,7 +659,7 @@ static void UpdateSelectedVehicle(void)
 
 static const char* GetBoneString(int statID)
 {
-	int n = gUserPhysics.carStats[gSelectedVehicleIndex].params[statID];
+	int n = gUserPhysics.carStats[GetEffectiveSelectedVehicle()].params[statID];
 
 	static char boneString[NUM_PARAM_BONES+1];
 
@@ -714,13 +745,36 @@ short	p;
 		MakeTwitch(gVehicleName, kTwitchPreset_DisplaceRTL);
 	}
 	else
-	if (GetNewNeedState(kNeed_UIRight, p) && (gSelectedVehicleIndex < NUM_LAND_CAR_TYPES-1))
+	if (GetNewNeedState(kNeed_UIRight, p) && (gSelectedVehicleIndex < GetNumVehicleSlots() - 1))
 	{
 		PlayEffect(EFFECT_SELECTCLICK);
 		gSelectedVehicleIndex++;
 		UpdateSelectedVehicle();
 		MakeTwitch(gVehicleRightArrow, kTwitchPreset_DisplaceRTL);
 		MakeTwitch(gVehicleName, kTwitchPreset_DisplaceLTR);
+	}
+	else
+	{
+		int verticalDir = 0;
+		if (GetNewNeedState(kNeed_UIUp, p))
+			verticalDir = 1;
+		else if (GetNewNeedState(kNeed_UIDown, p))
+			verticalDir = -1;
+
+		if (verticalDir != 0)
+		{
+			if (gSelectedVehicleIndex == CAR_TYPE_POLICE)
+			{
+				PlayEffect_Parms(EFFECT_SELECTCLICK, FULL_CHANNEL_VOLUME, FULL_CHANNEL_VOLUME, NORMAL_CHANNEL_RATE * 0.7f);
+				gPawPatrolVehicleSkin = (gPawPatrolVehicleSkin + verticalDir + NUM_PAW_PATROL_VEHICLES) % NUM_PAW_PATROL_VEHICLES;
+				UpdateSelectedVehicle();
+				MakeTwitch(gVehicleName, (verticalDir > 0) ? kTwitchPreset_DisplaceLTR : kTwitchPreset_DisplaceRTL);
+			}
+			else
+			{
+				PlayEffect(EFFECT_BADSELECT);
+			}
+		}
 	}
 
 	return(false);
@@ -734,6 +788,8 @@ short	p;
 
 static void MoveCarModel(ObjNode *theNode)
 {
+	if (theNode->Type >= CAR_TYPE_POLICE && theNode->Type < NUM_LAND_CAR_TYPES)
+		UpdatePoliceSirenLights(MODEL_GROUP_CARSELECT);
 	theNode->Rot.y += gFramesPerSecondFrac * 1.5f;
 	UpdateObjectTransforms(theNode);
 }

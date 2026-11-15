@@ -740,6 +740,32 @@ static int TestSplitScreenLANLoopback(void)
 	return 0;
 }
 
+static int TestHostDiscoveryNoSelfLoop(void)
+{
+	/* Verify periodic host discovery beacons on loopback/broadcast do not echo back into PollHostDiscoverySocket */
+	uint16_t gamePort = 29620 + (uint16_t)(getpid() % 100);
+	uint16_t discPort = gamePort + 1;
+	Net_SetPorts(gamePort, discPort);
+	InitNetworkManager();
+
+	TEST_ASSERT(Net_StartHostLobby("BeaconHost"), "Host failed to bind for self-loop test");
+
+	uint32_t maxCallMs = 0;
+	for (int i = 0; i < 40; i++)
+	{
+		uint32_t t0 = (uint32_t)SDL_GetTicks();
+		Net_PollLobby();
+		uint32_t dt = (uint32_t)SDL_GetTicks() - t0;
+		if (dt > maxCallMs)
+			maxCallMs = dt;
+		SDL_Delay(20);
+	}
+	TEST_ASSERT(maxCallMs < 100, "Net_PollLobby blocked or spun during discovery beacon interval");
+
+	ShutdownNetworkManager();
+	return 0;
+}
+
 static int RunPersistHostChild(uint16_t gamePort, uint16_t discPort)
 {
 	memset(gPlayerInfo, 0, sizeof(gPlayerInfo));
@@ -1122,6 +1148,10 @@ int main(void)
 	if (TestLANValidation() != 0)
 		return 1;
 	printf("PASS: TestLANValidation\n");
+
+	if (TestHostDiscoveryNoSelfLoop() != 0)
+		return 1;
+	printf("PASS: TestHostDiscoveryNoSelfLoop\n");
 
 	if (TestHostClientLoopback() != 0)
 		return 1;

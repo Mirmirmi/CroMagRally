@@ -30,10 +30,13 @@ static void OnPickHostOrJoin(const MenuItem* mi);
 static void OnPickClearSavedGame(const MenuItem* mi);
 static void OnPickTagDuration(const MenuItem* mi);
 static void OnPickNetLocalPlayers(const MenuItem* mi);
+static void OnToggleGlobalPawPatrol(const MenuItem* mi);
+static void OnToggleCPUPawPatrol(const MenuItem* mi);
 
 static int IsClearSavedGameAvailable(const MenuItem* mi);
 static int IsTournamentAgeAvailable(const MenuItem* mi);
 static int GetLayoutFlagsForTournamentObjective(const MenuItem* mi);
+static int GetPawPatrolCPUOptionFlags(const MenuItem* mi);
 
 /****************************/
 /*    CONSTANTS             */
@@ -86,6 +89,26 @@ static const MenuItem gMainMenuTree[] =
 			}
 		}
 	},
+	{
+		kMICycler1, STR_PAW_PATROL_MODE, .callback=OnToggleGlobalPawPatrol, .cycler=
+		{
+			.valuePtr=&gGamePrefs.pawPatrolEnabled, .choices=
+			{
+				{STR_OFF, 0},
+				{STR_ON, 1},
+			}
+		}
+	},
+	{
+		kMICycler1, STR_PAW_PATROL_CPU, .callback=OnToggleCPUPawPatrol, .getLayoutFlags=GetPawPatrolCPUOptionFlags, .cycler=
+		{
+			.valuePtr=&gGamePrefs.pawPatrolCPUEnabled, .choices=
+			{
+				{STR_OFF, 0},
+				{STR_ON, 1},
+			}
+		}
+	},
 	{kMIPick, STR_SETTINGS, .callback=RegisterSettingsMenu, .next='sett' },
 	{kMIPick, STR_CLEAR_SAVED_GAME, .next='clrs', .getLayoutFlags=IsClearSavedGameAvailable, .customHeight=.7 },
 
@@ -121,7 +144,7 @@ static const MenuItem gMainMenuTree[] =
 	{ .id='netg' },
 	{kMITextInput, STR_PLAYER_NAME, .textInput={ gGamePrefs.playerName, (int)sizeof(gGamePrefs.playerName), false } },
 	{
-		kMICycler1, STR_LOCAL_PLAYERS, .callback=OnPickNetLocalPlayers, .cycler=
+		kMICycler1, STR_LOCAL_PLAYERS, .callback=OnPickNetLocalPlayers, .customHeight=0.72f, .cycler=
 		{
 			.valuePtr=&sNetLocalPlayersChoice, .choices=
 			{
@@ -520,4 +543,23 @@ static int GetLayoutFlagsForTournamentObjective(const MenuItem* mi)
 		return isEasy? 0: kMILayoutFlagHidden;
 	else
 		return isEasy? kMILayoutFlagHidden: 0;
+}
+
+static void OnToggleGlobalPawPatrol(const MenuItem* mi)
+{
+	(void)mi;
+	SavePrefs();
+	LayoutCurrentMenuAgain();
+}
+
+static void OnToggleCPUPawPatrol(const MenuItem* mi)
+{
+	(void)mi;
+	SavePrefs();
+}
+
+static int GetPawPatrolCPUOptionFlags(const MenuItem* mi)
+{
+	(void)mi;
+	return gGamePrefs.pawPatrolEnabled ? 0 : kMILayoutFlagDisabled;
 }

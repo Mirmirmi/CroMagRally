@@ -13,6 +13,7 @@
 #include "game.h"
 #include "bones.h"
 #include "lzss.h"
+#include <stddef.h>
 
 /****************************/
 /*    PROTOTYPES            */
@@ -119,6 +120,15 @@ static const char* kSkeletonNames[MAX_SKELETON_TYPES] =
 {
 	[SKELETON_TYPE_PLAYER_MALE]		= "Brog",
 	[SKELETON_TYPE_PLAYER_FEMALE]	= "Grag",
+	[SKELETON_TYPE_PLAYER_CHASE]	= "Chase",
+	[SKELETON_TYPE_PLAYER_MARSHALL]	= "Marshall",
+	[SKELETON_TYPE_PLAYER_SKYE]		= "Skye",
+	[SKELETON_TYPE_PLAYER_LIBERTY]	= "Liberty",
+	[SKELETON_TYPE_PLAYER_RUBBLE]	= "Rubble",
+	[SKELETON_TYPE_PLAYER_ZUMA]		= "Zuma",
+	[SKELETON_TYPE_PLAYER_ROCKY]	= "Rocky",
+	[SKELETON_TYPE_PLAYER_RYDER]	= "Ryder",
+	[SKELETON_TYPE_PLAYER_HUMDINGER] = "Humdinger",
 	[SKELETON_TYPE_BIRDBOMB]		= "BirdBomb",
 	[SKELETON_TYPE_YETI]			= "Yeti",
 	[SKELETON_TYPE_BEETLE]			= "Beetle",
@@ -130,6 +140,15 @@ static const char* kSkeletonNames[MAX_SKELETON_TYPES] =
 	[SKELETON_TYPE_PTERADACTYL]		= "Pterodactyl",
 	[SKELETON_TYPE_MALESTANDING]	= "BrogStanding",
 	[SKELETON_TYPE_FEMALESTANDING]	= "GragStanding",
+	[SKELETON_TYPE_CHASESTANDING]	= "ChaseStanding",
+	[SKELETON_TYPE_MARSHALLSTANDING]= "MarshallStanding",
+	[SKELETON_TYPE_SKYESTANDING]	= "SkyeStanding",
+	[SKELETON_TYPE_LIBERTYSTANDING]	= "LibertyStanding",
+	[SKELETON_TYPE_RUBBLESTANDING]	= "RubbleStanding",
+	[SKELETON_TYPE_ZUMASTANDING]	= "ZumaStanding",
+	[SKELETON_TYPE_ROCKYSTANDING]	= "RockyStanding",
+	[SKELETON_TYPE_RYDERSTANDING]	= "RyderStanding",
+	[SKELETON_TYPE_HUMDINGERSTANDING] = "HumdingerStanding",
 	[SKELETON_TYPE_DRAGON]			= "Dragon",
 	[SKELETON_TYPE_MUMMY]			= "Mummy",
 	[SKELETON_TYPE_TROLL]			= "Troll",
@@ -552,7 +571,14 @@ long				count;
 
 OSErr LoadPrefs(void)
 {
+	InitDefaultPrefs();
+
 	OSErr err = LoadUserDataFile(PREFS_FILENAME, PREFS_MAGIC, sizeof(PrefsType), (Ptr) &gGamePrefs);
+
+	if (err != noErr)
+	{
+		err = LoadUserDataFile(PREFS_FILENAME, PREFS_MAGIC, (long) offsetof(PrefsType, pawPatrolEnabled), (Ptr) &gGamePrefs);
+	}
 
 	if (err != noErr)
 	{
@@ -844,6 +870,15 @@ static const char*	levelModelFiles[NUM_TRACKS] =
 
 	LoadASkeleton(SKELETON_TYPE_PLAYER_MALE);
 	LoadASkeleton(SKELETON_TYPE_PLAYER_FEMALE);
+	LoadASkeleton(SKELETON_TYPE_PLAYER_CHASE);
+	LoadASkeleton(SKELETON_TYPE_PLAYER_MARSHALL);
+	LoadASkeleton(SKELETON_TYPE_PLAYER_SKYE);
+	LoadASkeleton(SKELETON_TYPE_PLAYER_LIBERTY);
+	LoadASkeleton(SKELETON_TYPE_PLAYER_RUBBLE);
+	LoadASkeleton(SKELETON_TYPE_PLAYER_ZUMA);
+	LoadASkeleton(SKELETON_TYPE_PLAYER_ROCKY);
+	LoadASkeleton(SKELETON_TYPE_PLAYER_RYDER);
+	LoadASkeleton(SKELETON_TYPE_PLAYER_HUMDINGER);
 
 	LoadASkeleton(SKELETON_TYPE_BIRDBOMB);
 

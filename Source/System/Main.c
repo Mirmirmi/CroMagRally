@@ -31,7 +31,6 @@ static Boolean PlayGame_Tag(void);
 static Boolean PlayGame_Survival(void);
 static Boolean PlayGame_CaptureTheFlag(void);
 void UpdateGameModeSpecifics(void);
-void UpdateGameModeSpecifics(void);
 
 static void TallyTokens(void);
 
@@ -160,6 +159,8 @@ void InitDefaultPrefs(void)
 	gGamePrefs.tagDuration 			= 3;
 	gGamePrefs.musicVolumePercent	= 60;			// careful to set these two volumes to one of the
 	gGamePrefs.sfxVolumePercent		= 60;			// the predefined values allowed in the settings menu
+	gGamePrefs.pawPatrolEnabled		= true;
+	gGamePrefs.pawPatrolCPUEnabled	= true;
 
 	SDL_memcpy(&gGamePrefs.bindings, kDefaultInputBindings, sizeof(kDefaultInputBindings));
 }
@@ -306,7 +307,10 @@ select_track:
 select_sex:
 	if (gIsSelfRunningDemo)									// auto-pick if SRD
 	{
-		gPlayerInfo[0].sex = MyRandomLong() & 1;
+		int maxCharacters = IsPawPatrolEnabled() ? NUM_PLAYER_CHARACTERS : 2;
+		int maxLandCars = IsPawPatrolEnabled() ? NUM_LAND_CAR_TYPES : CAR_TYPE_POLICE;
+
+		gPlayerInfo[0].sex = MyRandomLong() % maxCharacters;
 
 		switch (GetNumAgesCompleted())
 		{
@@ -318,8 +322,12 @@ select_sex:
 					gPlayerInfo[0].vehicleType = RandomRange(0, 7);
 					break;
 
-			default:
+			case	2:
 					gPlayerInfo[0].vehicleType = RandomRange(0, 9);
+					break;
+
+			default:
+					gPlayerInfo[0].vehicleType = RandomRange(0, maxLandCars - 1);
 					break;
 		}
 		gAutoPilot = true;									// set auto-pilot so computer will play for us in SRD mode
