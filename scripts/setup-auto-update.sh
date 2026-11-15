@@ -9,7 +9,8 @@ OS="$(uname -s)"
 
 if [[ "${OS}" == "Darwin" ]]; then
   SUPPORT_DIR="${HOME}/Library/Application Support/CroMagRally"
-  APP_INSTALL_PATH="${SUPPORT_DIR}/Cro-Mag Rally.app"
+  RUNTIME_DIR="${SUPPORT_DIR}/.runtime"
+  APP_INSTALL_PATH="${RUNTIME_DIR}/Cro-Mag Rally.app"
   UPDATER_DST="${SUPPORT_DIR}/cromag-updater.py"
   LOG_FILE="${HOME}/Library/Logs/CroMagRally-updater.log"
   PLIST_DIR="${HOME}/Library/LaunchAgents"
@@ -17,12 +18,15 @@ if [[ "${OS}" == "Darwin" ]]; then
   LAUNCHER_APP="/Applications/Cro-Mag Rally.app"
   OLD_LAUNCHER_APP="/Applications/Play Cro-Mag Rally.app"
 
-  mkdir -p "${SUPPORT_DIR}" "${PLIST_DIR}" "$(dirname "${LOG_FILE}")"
+  mkdir -p "${SUPPORT_DIR}" "${RUNTIME_DIR}" "${PLIST_DIR}" "$(dirname "${LOG_FILE}")"
   touch "${SUPPORT_DIR}/.metadata_never_index"
   cp "${UPDATER_SRC}" "${UPDATER_DST}"
   chmod 0755 "${UPDATER_DST}"
 
-  # Migrate an existing game bundle out of /Applications so Spotlight only sees one Cro-Mag Rally.app
+  # Migrate an existing game bundle out of /Applications or Support root so Spotlight only sees the launcher
+  if [[ -e "${SUPPORT_DIR}/Cro-Mag Rally.app" && ! -e "${APP_INSTALL_PATH}" ]]; then
+    mv "${SUPPORT_DIR}/Cro-Mag Rally.app" "${APP_INSTALL_PATH}"
+  fi
   if [[ -e "${LAUNCHER_APP}/Contents/MacOS/CroMagRally" && ! -e "${APP_INSTALL_PATH}" ]]; then
     mv "${LAUNCHER_APP}" "${APP_INSTALL_PATH}"
   fi

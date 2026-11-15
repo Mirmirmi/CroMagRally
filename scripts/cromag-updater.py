@@ -96,7 +96,7 @@ def detect_platform_key() -> tuple[str, str]:
 
 def default_install_path() -> Path:
     if platform.system() == "Darwin":
-        return Path.home() / "Library" / "Application Support" / "CroMagRally" / APP_NAME_MAC
+        return Path.home() / "Library" / "Application Support" / "CroMagRally" / ".runtime" / APP_NAME_MAC
     return Path.home() / ".local" / "share" / "CroMagRally" / "CroMagRally.AppImage"
 
 
