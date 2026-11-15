@@ -740,6 +740,383 @@ static int TestSplitScreenLANLoopback(void)
 	return 0;
 }
 
+static int RunPersistHostChild(uint16_t gamePort, uint16_t discPort)
+{
+	memset(gPlayerInfo, 0, sizeof(gPlayerInfo));
+	memset(&gGamePrefs, 0, sizeof(gGamePrefs));
+	gGameMode = GAME_MODE_MULTIPLAYERRACE;
+	gTheAge = 2;
+	gTrackNum = TRACK_NUM_EUROPE;
+	gGamePrefs.difficulty = 2;
+	gGamePrefs.tagDuration = 2;
+	gMultiplayerCPUs = 0;
+	gGameOver = false;
+	gTrackCompleted = false;
+	gNumLocalPlayers = 2;
+	gLocalPlayerNums[0] = 0;
+	gLocalPlayerNums[1] = 1;
+	gLocalPlayerNums[2] = 2;
+	gLocalPlayerNums[3] = 3;
+
+	Net_SetPorts(gamePort, discPort);
+	InitNetworkManager();
+
+	TEST_ASSERT(Net_StartHostLobby("PersistHost"), "Persist host failed to bind lobby");
+	TEST_ASSERT(!Net_HasRemoteClients(), "Persist host should start with no remote clients");
+
+	uint32_t start = SDL_GetTicks();
+	while (Net_GetConnectedPlayerCount() < 4 && (SDL_GetTicks() - start) < 6000)
+	{
+		Net_PollLobby();
+		SDL_Delay(10);
+	}
+	TEST_ASSERT(Net_GetConnectedPlayerCount() == 4, "Persist host expected 4 players (2 local + 2 remote)");
+	TEST_ASSERT(Net_HasRemoteClients(), "Persist host must report remote clients before match 1");
+
+	/* Launch Match 1: Multiplayer Race */
+	TEST_ASSERT(Net_HostLaunchMatch(), "Persist host failed to launch match 1");
+
+	gPlayerInfo[0].sex = 0;
+	gPlayerInfo[0].vehicleType = 1;
+	gPlayerInfo[0].skin = 0;
+	gPlayerInfo[0].team = 0;
+	gPlayerInfo[1].sex = 1;
+	gPlayerInfo[1].vehicleType = 2;
+	gPlayerInfo[1].skin = 1;
+	gPlayerInfo[1].team = 0;
+	PlayerBroadcastVehicleType();
+	TEST_ASSERT(!GetVehicleSelectionFromNetPlayers(), "Persist host match 1 vehicle selection aborted");
+	gNumTotalPlayers = gNumRealPlayers;
+	HostWaitForPlayersToPrepareLevel();
+
+	ObjNode cars[4];
+	memset(cars, 0, sizeof(cars));
+	for (int i = 0; i < 4; i++)
+	{
+		gPlayerInfo[i].objNode = &cars[i];
+		gPlayerInfo[i].isComputer = false;
+		gPlayerInfo[i].raceComplete = false;
+	}
+
+	/* ClientA (slot 2) finishes early while Host & ClientB have not finished yet */
+	gPlayerInfo[2].raceComplete = true;
+	gPlayerInfo[2].place = 1;
+	gTrackCompleted = false;
+	Net_HostSendLapOrFinish(2);
+
+	/* Keep pumping until ClientB (slot 3) disconnects mid-race */
+	start = SDL_GetTicks();
+	while (!gPlayerInfo[3].isComputer && (SDL_GetTicks() - start) < 6000)
+	{
+		HostReceive_ControlInfoFromClients();
+		HostSend_ControlInfoToClients();
+		SDL_Delay(10);
+	}
+	TEST_ASSERT(gPlayerInfo[3].isComputer, "Departed ClientB (slot 3) was not promoted to AI");
+	TEST_ASSERT(!gPlayerInfo[2].isComputer, "Remaining ClientA (slot 2) must stay human after ClientB leaves");
+	TEST_ASSERT(Net_HasRemoteClients(), "Host must still have remote ClientA after ClientB leaves");
+
+	/* Remaining humans (Host P1 & P2) finish, completing Match 1 */
+	gPlayerInfo[0].raceComplete = true;
+	gPlayerInfo[1].raceComplete = true;
+	gTrackCompleted = true;
+	Net_HostSendLapOrFinish(-1);
+
+	start = SDL_GetTicks();
+	while ((SDL_GetTicks() - start) < 200)
+	{
+		HostReceive_ControlInfoFromClients();
+		HostSend_ControlInfoToClients();
+		SDL_Delay(10);
+	}
+
+	/* Return all still-connected players to persistent lobby */
+	gTrackCompleted = false;
+	TEST_ASSERT(Net_HasRemoteClients(), "Host must still have ClientA when returning to lobby");
+	Net_HostReturnToLobby();
+	TEST_ASSERT(Net_GetConnectedPlayerCount() == 3, "Lobby must compact to 3 players (Host 2P + ClientA)");
+	TEST_ASSERT(Net_HasRemoteClients(), "Host must still report ClientA in lobby");
+
+	/* Give ClientA a moment to return to lobby, then change mode & launch Match 2 */
+	start = SDL_GetTicks();
+	while ((SDL_GetTicks() - start) < 250)
+	{
+		Net_PollLobby();
+		SDL_Delay(10);
+	}
+
+	gGameMode = GAME_MODE_SURVIVAL;
+	gTheAge = 0;
+	gTrackNum = TRACK_NUM_EUROPE;
+	gTrackCompleted = false;
+	TEST_ASSERT(Net_HostLaunchMatch(), "Persist host failed to launch match 2");
+
+	gPlayerInfo[0].vehicleType = 1;
+	gPlayerInfo[1].vehicleType = 2;
+	PlayerBroadcastVehicleType();
+	TEST_ASSERT(!GetVehicleSelectionFromNetPlayers(), "Persist host match 2 vehicle selection aborted");
+	gNumTotalPlayers = gNumRealPlayers;
+	HostWaitForPlayersToPrepareLevel();
+
+	/* Verify Survival elimination broadcast reaches ClientA */
+	Net_HostSendElimination(2);
+
+	/* Pump until final client disconnects cleanly on its own */
+	start = SDL_GetTicks();
+	while (Net_HasRemoteClients() && (SDL_GetTicks() - start) < 6000)
+	{
+		HostReceive_ControlInfoFromClients();
+		HostSend_ControlInfoToClients();
+		SDL_Delay(10);
+	}
+	TEST_ASSERT(!Net_HasRemoteClients(), "Host must see Net_HasRemoteClients() == false once all clients leave");
+
+	ShutdownNetworkManager();
+	return 0;
+}
+
+static int RunPersistClientBChild(uint16_t gamePort, uint16_t discPort, int readyFd)
+{
+	char go = 0;
+	if (read(readyFd, &go, 1) != 1)
+	{
+		close(readyFd);
+		return 1;
+	}
+	close(readyFd);
+
+	memset(gPlayerInfo, 0, sizeof(gPlayerInfo));
+	memset(&gGamePrefs, 0, sizeof(gGamePrefs));
+	gGameMode = GAME_MODE_PRACTICE;
+	gTheAge = 0;
+	gTrackNum = TRACK_NUM_DESERT;
+	gMultiplayerCPUs = 0;
+	gGameOver = false;
+	gTrackCompleted = false;
+	gNumLocalPlayers = 1;
+	gLocalPlayerNums[0] = 0;
+	sShowWinLoseCalls = 0;
+	sShowFinalPlaceCalls = 0;
+
+	Net_SetPorts(gamePort, discPort);
+	InitNetworkManager();
+
+	TEST_ASSERT(Net_ConnectToHost("127.0.0.1", gamePort, "ClientB"), "ClientB Net_ConnectToHost failed");
+	uint32_t start = SDL_GetTicks();
+	while (Net_GetConnectionState(NULL) == kNetConn_Connecting && (SDL_GetTicks() - start) < 5000)
+	{
+		Net_PollLobby();
+		SDL_Delay(10);
+	}
+	TEST_ASSERT(Net_GetConnectionState(NULL) == kNetConn_Connected, "ClientB failed to connect");
+	TEST_ASSERT(gMyNetworkPlayerNum == 3, "ClientB expected slot 3");
+
+	gPlayerInfo[3].onThisMachine = true;
+	gPlayerInfo[3].splitPaneNum = 0;
+
+	start = SDL_GetTicks();
+	while (!Net_ClientHasMatchStarted() && (SDL_GetTicks() - start) < 5000)
+	{
+		Net_PollLobby();
+		SDL_Delay(10);
+	}
+	TEST_ASSERT(Net_ClientHasMatchStarted(), "ClientB missed Match 1 start");
+
+	gPlayerInfo[3].vehicleType = 4;
+	PlayerBroadcastVehicleType();
+	TEST_ASSERT(!GetVehicleSelectionFromNetPlayers(), "ClientB vehicle selection failed");
+	ClientTellHostLevelIsPrepared();
+
+	ObjNode cars[4];
+	memset(cars, 0, sizeof(cars));
+	for (int i = 0; i < 4; i++)
+		gPlayerInfo[i].objNode = &cars[i];
+
+	/* Wait until ClientA finishes early (and verify race did NOT prematurely end) */
+	start = SDL_GetTicks();
+	while (!gPlayerInfo[2].raceComplete && (SDL_GetTicks() - start) < 5000)
+	{
+		ClientReceive_ControlInfoFromHost();
+		ClientSend_ControlInfoToHost();
+		SDL_Delay(10);
+	}
+	TEST_ASSERT(gPlayerInfo[2].raceComplete, "ClientB did not observe ClientA partial finish");
+	TEST_ASSERT(!gTrackCompleted, "Race must not end on ClientB when only ClientA finished");
+
+	/* Disconnect mid-race */
+	Net_DisconnectGracefully();
+	SDL_Delay(50);
+	ShutdownNetworkManager();
+	return 0;
+}
+
+static int TestPersistentLobbyAndMultiFinishLoopback(void)
+{
+	uint16_t basePort = (uint16_t)(41000 + (getpid() % 500) * 4);
+	uint16_t gamePort = basePort;
+	uint16_t discPort = (uint16_t)(basePort + 1);
+
+	/* Fork all child processes BEFORE InitNetworkManager() so ENet sockets are isolated */
+	int syncPipe[2];
+	TEST_ASSERT(pipe(syncPipe) == 0, "pipe() failed");
+
+	pid_t hostPid = fork();
+	TEST_ASSERT(hostPid >= 0, "fork() failed for persistent lobby host");
+	if (hostPid == 0)
+	{
+		close(syncPipe[0]);
+		close(syncPipe[1]);
+		_exit(RunPersistHostChild(gamePort, discPort));
+	}
+
+	pid_t clientBPid = fork();
+	TEST_ASSERT(clientBPid >= 0, "fork() failed for persistent lobby ClientB");
+	if (clientBPid == 0)
+	{
+		close(syncPipe[1]);
+		_exit(RunPersistClientBChild(gamePort, discPort, syncPipe[0]));
+	}
+	close(syncPipe[0]);
+
+	SDL_Delay(40);
+
+	memset(gPlayerInfo, 0, sizeof(gPlayerInfo));
+	memset(&gGamePrefs, 0, sizeof(gGamePrefs));
+	gGameMode = GAME_MODE_PRACTICE;
+	gTheAge = 0;
+	gTrackNum = TRACK_NUM_DESERT;
+	gMultiplayerCPUs = 0;
+	gGameOver = false;
+	gTrackCompleted = false;
+	gNumLocalPlayers = 1;
+	gLocalPlayerNums[0] = 0;
+	sShowWinLoseCalls = 0;
+	sShowFinalPlaceCalls = 0;
+	sLastWinner = -1;
+
+	Net_SetPorts(gamePort, discPort);
+	InitNetworkManager();
+
+	/* Connect ClientA first so slot 2 is deterministic, then unblock ClientB for slot 3 */
+	TEST_ASSERT(Net_ConnectToHost("127.0.0.1", gamePort, "ClientA"), "ClientA Net_ConnectToHost failed");
+	uint32_t start = SDL_GetTicks();
+	while (Net_GetConnectionState(NULL) == kNetConn_Connecting && (SDL_GetTicks() - start) < 5000)
+	{
+		Net_PollLobby();
+		SDL_Delay(10);
+	}
+	TEST_ASSERT(Net_GetConnectionState(NULL) == kNetConn_Connected, "ClientA failed to connect");
+	TEST_ASSERT(gMyNetworkPlayerNum == 2, "ClientA expected slot 2");
+
+	char go = 1;
+	TEST_ASSERT(write(syncPipe[1], &go, 1) == 1, "write to syncPipe failed");
+	close(syncPipe[1]);
+
+	gPlayerInfo[2].onThisMachine = true;
+	gPlayerInfo[2].splitPaneNum = 0;
+
+	start = SDL_GetTicks();
+	while (!Net_ClientHasMatchStarted() && (SDL_GetTicks() - start) < 6000)
+	{
+		Net_PollLobby();
+		SDL_Delay(10);
+	}
+	TEST_ASSERT(Net_ClientHasMatchStarted() && gGameMode == GAME_MODE_MULTIPLAYERRACE,
+	            "ClientA did not receive Match 1 StartMatch");
+
+	gPlayerInfo[2].vehicleType = 3;
+	PlayerBroadcastVehicleType();
+	TEST_ASSERT(!GetVehicleSelectionFromNetPlayers(), "ClientA match 1 vehicle selection failed");
+	ClientTellHostLevelIsPrepared();
+
+	ObjNode cars[4];
+	memset(cars, 0, sizeof(cars));
+	for (int i = 0; i < 4; i++)
+		gPlayerInfo[i].objNode = &cars[i];
+
+	/* 1. ClientA finishes early: raceComplete becomes true, ShowFinalPlace called, gTrackCompleted STILL false */
+	start = SDL_GetTicks();
+	while (!gPlayerInfo[2].raceComplete && (SDL_GetTicks() - start) < 5000)
+	{
+		ClientReceive_ControlInfoFromHost();
+		ClientSend_ControlInfoToHost();
+		SDL_Delay(10);
+	}
+	TEST_ASSERT(gPlayerInfo[2].raceComplete, "ClientA did not observe own early finish");
+	TEST_ASSERT(sShowFinalPlaceCalls >= 1, "ClientA did not trigger ShowFinalPlace on early finish");
+	TEST_ASSERT(!gTrackCompleted, "Match 1 must NOT end when only ClientA finished");
+
+	/* 2. ClientB disconnects mid-race, Host & P2 finish -> gTrackCompleted becomes true, ClientA stays connected */
+	start = SDL_GetTicks();
+	while (!gTrackCompleted && (SDL_GetTicks() - start) < 6000)
+	{
+		ClientReceive_ControlInfoFromHost();
+		ClientSend_ControlInfoToHost();
+		SDL_Delay(10);
+	}
+	TEST_ASSERT(gTrackCompleted, "ClientA did not receive final Match 1 completion");
+	TEST_ASSERT(gPlayerInfo[3].isComputer, "ClientA did not observe departed ClientB promoted to AI");
+	TEST_ASSERT(Net_GetConnectionState(NULL) == kNetConn_Connected,
+	            "ClientA must stay connected after ClientB disconnects");
+
+	/* 3. Persistent return to lobby across matches */
+	gTrackCompleted = false;
+	Net_ClientPrepareReturnToLobby();
+
+	start = SDL_GetTicks();
+	while ((Net_ClientHasMatchStarted() || Net_GetConnectedPlayerCount() != 3) && (SDL_GetTicks() - start) < 5000)
+	{
+		Net_PollLobby();
+		SDL_Delay(10);
+	}
+	TEST_ASSERT(!Net_ClientHasMatchStarted(), "ClientA did not return to lobby state");
+	TEST_ASSERT(Net_GetConnectedPlayerCount() == 3, "ClientA lobby player count should compact to 3");
+	TEST_ASSERT(gMyNetworkPlayerNum == 2 && gLocalPlayerNums[0] == 2,
+	            "ClientA slot must stay compact slot 2 after ClientB (slot 3) left");
+
+	/* 4. Wait for Match 2 (Survival) on the same persistent ENet connection */
+	start = SDL_GetTicks();
+	while ((!Net_ClientHasMatchStarted() || gGameMode != GAME_MODE_SURVIVAL) && (SDL_GetTicks() - start) < 6000)
+	{
+		Net_PollLobby();
+		SDL_Delay(10);
+	}
+	TEST_ASSERT(Net_ClientHasMatchStarted() && gGameMode == GAME_MODE_SURVIVAL,
+	            "ClientA did not receive Match 2 StartMatch with Survival mode");
+
+	sShowWinLoseCalls = 0;
+	gPlayerInfo[2].vehicleType = 5;
+	PlayerBroadcastVehicleType();
+	TEST_ASSERT(!GetVehicleSelectionFromNetPlayers(), "ClientA match 2 vehicle selection failed");
+	ClientTellHostLevelIsPrepared();
+
+	for (int i = 0; i < 4; i++)
+		gPlayerInfo[i].objNode = &cars[i];
+
+	start = SDL_GetTicks();
+	while (sShowWinLoseCalls == 0 && (SDL_GetTicks() - start) < 5000)
+	{
+		ClientReceive_ControlInfoFromHost();
+		ClientSend_ControlInfoToHost();
+		SDL_Delay(10);
+	}
+	TEST_ASSERT(sShowWinLoseCalls >= 1, "ClientA did not receive Survival elimination broadcast");
+
+	/* 5. ClientA leaves on its own accord */
+	Net_DisconnectGracefully();
+	SDL_Delay(50);
+	ShutdownNetworkManager();
+
+	int statusB = 0;
+	TEST_ASSERT(waitpid(clientBPid, &statusB, 0) == clientBPid, "waitpid failed for ClientB");
+	TEST_ASSERT(WIFEXITED(statusB) && WEXITSTATUS(statusB) == 0, "ClientB child failed assertions");
+
+	int statusH = 0;
+	TEST_ASSERT(waitpid(hostPid, &statusH, 0) == hostPid, "waitpid failed for Persist Host");
+	TEST_ASSERT(WIFEXITED(statusH) && WEXITSTATUS(statusH) == 0, "Persist Host child failed assertions");
+	return 0;
+}
+
 int main(void)
 {
 	if (TestLANValidation() != 0)
@@ -753,5 +1130,9 @@ int main(void)
 	if (TestSplitScreenLANLoopback() != 0)
 		return 1;
 	printf("PASS: TestSplitScreenLANLoopback\n");
+
+	if (TestPersistentLobbyAndMultiFinishLoopback() != 0)
+		return 1;
+	printf("PASS: TestPersistentLobbyAndMultiFinishLoopback\n");
 	return 0;
 }

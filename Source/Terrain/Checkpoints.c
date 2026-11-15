@@ -353,6 +353,16 @@ next:
 
 
 
+Boolean AreAllHumansFinishedRace(void)
+{
+	for (short i = 0; i < gNumTotalPlayers; i++)
+	{
+		if (!gPlayerInfo[i].isComputer && !gPlayerInfo[i].raceComplete)
+			return false;
+	}
+	return true;
+}
+
 /****************** PLAYER COMPLETED RACE ************************/
 //
 // Called when player crosses the finish line on the final lap.
@@ -368,12 +378,32 @@ void PlayerCompletedRace(short playerNum)
 
 			/* TELL WINNER IN MULTIPLAYER RACE */
 			//
-			// Game ends as soon as the 1st human finishes the race
+			// In local games, race ends when the 1st human finishes.
+			// In LAN netgames, race continues until all remaining humans finish.
 			//
 
 	if (gGameMode == GAME_MODE_MULTIPLAYERRACE)
 	{
-		if (!gTrackCompleted && !gPlayerInfo[playerNum].isComputer)
+		if (gNetGameInProgress)
+		{
+			if (!gPlayerInfo[playerNum].isComputer)
+			{
+				if (gPlayerInfo[playerNum].onThisMachine)
+				{
+					ShowFinalPlace(playerNum, rankInScoreboard);
+				}
+
+				if (!gTrackCompleted && AreAllHumansFinishedRace())
+				{
+					gTrackCompleted = true;
+					gTrackCompletedCoolDownTimer = TRACK_COMPLETE_COOLDOWN_TIME;
+				}
+
+				if (gIsNetworkHost)
+					Net_HostSendLapOrFinish(playerNum);
+			}
+		}
+		else if (!gTrackCompleted && !gPlayerInfo[playerNum].isComputer)
 		{
 			for (short i = 0; i < gNumTotalPlayers; i++)
 			{
@@ -382,9 +412,6 @@ void PlayerCompletedRace(short playerNum)
 					ShowFinalPlace(i, (i == playerNum) ? rankInScoreboard : -1);
 				}
 			}
-
-			if (gIsNetworkHost)
-				Net_HostSendLapOrFinish(playerNum);
 
 			gTrackCompleted = true;
 			gTrackCompletedCoolDownTimer = TRACK_COMPLETE_COOLDOWN_TIME;

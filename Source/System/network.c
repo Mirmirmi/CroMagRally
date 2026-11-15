@@ -95,6 +95,7 @@ static uint16_t                sMyMachineId = 0;
 static uint16_t                sNextMachineId = 2;
 static Boolean                 sClientMatchStarted = false;
 static Boolean                 sClientLevelGo = false;
+static uint32_t                sCurrentMatchId = 0;
 static uint32_t                sPendingSeed = 1;
 static int8_t                  sPendingWhoIsIt = 0;
 
@@ -604,6 +605,9 @@ static void HandleJoinRequest(ENetPeer* peer, const NetJoinRequestMsg* req)
 
 static void HandleReliableEventOnClient(const NetReliableEventMsg* ev)
 {
+	if (!sClientMatchStarted)
+		return;
+
 	switch (ev->kind)
 	{
 		case kNetEvent_POWPickup:
@@ -641,16 +645,17 @@ static void HandleReliableEventOnClient(const NetReliableEventMsg* ev)
 			{
 				gPlayerInfo[p].raceComplete = true;
 				gPlayerInfo[p].place = ev->b;
-				if (!gTrackCompleted && gGameMode == GAME_MODE_MULTIPLAYERRACE)
+				if (gGameMode == GAME_MODE_MULTIPLAYERRACE &&
+				    gPlayerInfo[p].onThisMachine &&
+				    !gPlayerInfo[p].isComputer)
 				{
-					gTrackCompleted = true;
-					gTrackCompletedCoolDownTimer = TRACK_COMPLETE_COOLDOWN_TIME;
-					for (int pane = 0; pane < gNumLocalPlayers && pane < MAX_LOCAL_PLAYERS; pane++)
-					{
-						short slot = gLocalPlayerNums[pane];
-						ShowFinalPlace(slot, (p == slot) ? 0 : -1);
-					}
+					ShowFinalPlace(p, -1);
 				}
+			}
+			if (ev->c != 0 && !gTrackCompleted && gGameMode == GAME_MODE_MULTIPLAYERRACE)
+			{
+				gTrackCompleted = true;
+				gTrackCompletedCoolDownTimer = TRACK_COMPLETE_COOLDOWN_TIME;
 			}
 			break;
 		}
@@ -721,6 +726,39 @@ static void HandleReliableEventOnClient(const NetReliableEventMsg* ev)
 	}
 }
 
+static void CompactLobbySlots(void)
+{
+	int writeIdx = 0;
+	for (int readIdx = 0; readIdx < MAX_PLAYERS; readIdx++)
+	{
+		if (!sLobbyState.players[readIdx].active)
+			continue;
+		if (writeIdx != readIdx)
+		{
+			sLobbyState.players[writeIdx] = sLobbyState.players[readIdx];
+			sClientPeers[writeIdx] = sClientPeers[readIdx];
+			memset(&sLobbyState.players[readIdx], 0, sizeof(sLobbyState.players[readIdx]));
+			sClientPeers[readIdx] = NULL;
+		}
+		writeIdx++;
+	}
+
+	if (gIsNetworkHost && sMyMachineId != 0)
+	{
+		int found = 0;
+		for (int i = 0; i < MAX_PLAYERS && found < MAX_LOCAL_PLAYERS; i++)
+		{
+			if (sLobbyState.players[i].active && sLobbyState.players[i].machineId == sMyMachineId)
+				gLocalPlayerNums[found++] = (short)i;
+		}
+		if (found > 0)
+		{
+			gNumLocalPlayers = (short)found;
+			gMyNetworkPlayerNum = gLocalPlayerNums[0];
+		}
+	}
+}
+
 static void HandlePeerDisconnectOnHost(ENetPeer* peer)
 {
 	if (!peer)
@@ -761,20 +799,7 @@ static void HandlePeerDisconnectOnHost(ENetPeer* peer)
 	if (!sLobbyState.matchStarted)
 	{
 		/* Compact remaining active lobby slots so humans remain contiguous 0..numRealPlayers-1 */
-		int writeIdx = 0;
-		for (int readIdx = 0; readIdx < MAX_PLAYERS; readIdx++)
-		{
-			if (!sLobbyState.players[readIdx].active)
-				continue;
-			if (writeIdx != readIdx)
-			{
-				sLobbyState.players[writeIdx] = sLobbyState.players[readIdx];
-				sClientPeers[writeIdx] = sClientPeers[readIdx];
-				memset(&sLobbyState.players[readIdx], 0, sizeof(sLobbyState.players[readIdx]));
-				sClientPeers[readIdx] = NULL;
-			}
-			writeIdx++;
-		}
+		CompactLobbySlots();
 		BroadcastLobbyState();
 	}
 }
@@ -1113,8 +1138,25 @@ static void HandlePacketOnClient(const uint8_t* data, size_t len)
 			if (len >= sizeof(NetStartMatchMsg))
 			{
 				const NetStartMatchMsg* sm = (const NetStartMatchMsg*)data;
+				sCurrentMatchId = sm->matchId;
 				sPendingSeed = sm->randomSeed;
 				sClientMatchStarted = true;
+				sClientLevelGo = false;
+			}
+			break;
+
+		case kNetMsgReturnToLobby:
+			if (len >= sizeof(NetReturnToLobbyMsg))
+			{
+				const NetReturnToLobbyMsg* rtl = (const NetReturnToLobbyMsg*)data;
+				if (rtl->endedMatchId >= sCurrentMatchId)
+				{
+					sClientMatchStarted = false;
+					sClientLevelGo = false;
+					sLobbyState.matchStarted = 0;
+					Net_ResetGameSyncState();
+					ApplyLobbyStateToGlobals();
+				}
 			}
 			break;
 
@@ -1130,7 +1172,7 @@ static void HandlePacketOnClient(const uint8_t* data, size_t len)
 			break;
 
 		case kNetMsgHostSnapshot:
-			if (len >= sizeof(NetHostSnapshotMsg))
+			if (sClientMatchStarted && len >= sizeof(NetHostSnapshotMsg))
 			{
 				const NetHostSnapshotMsg* snap = (const NetHostSnapshotMsg*)data;
 				if (!sHasSnapshot || (int32_t)(snap->seq - sLastRecvSnapSeq) > 0)
@@ -1190,6 +1232,8 @@ void InitNetworkManager(void)
 	gNetGameInProgress = false;
 	sConnState = kNetConn_Idle;
 	sStatusText[0] = '\0';
+	sLobbyState.msgType = kNetMsgLobbyState;
+	sCurrentMatchId = 0;
 	memset(sClientPeers, 0, sizeof(sClientPeers));
 	memset(&sLobbyState, 0, sizeof(sLobbyState));
 	Net_ResetGameSyncState();
@@ -1299,6 +1343,7 @@ void ShutdownNetworkManager(void)
 		gLocalPlayerNums[k] = (short)k;
 	sMyMachineId = 0;
 	sNextMachineId = 2;
+	sCurrentMatchId = 0;
 	sClientMatchStarted = false;
 	sClientLevelGo = false;
 	sConnState = kNetConn_Idle;
@@ -1416,11 +1461,18 @@ Boolean Net_HostLaunchMatch(void)
 	if (!gIsNetworkHost || !sHost)
 		return false;
 
+	gGameOver = false;
+	gTrackCompleted = false;
+	memset(sClientLevelPreparedSent, 0, sizeof(sClientLevelPreparedSent));
+	Net_ResetGameSyncState();
+
+	sCurrentMatchId++;
 	sLobbyState.matchStarted = 1;
 	BroadcastLobbyState();
 
 	NetStartMatchMsg sm;
 	sm.msgType = kNetMsgStartMatch;
+	sm.matchId = sCurrentMatchId;
 	sm.randomSeed = (uint32_t)MyRandomLong();
 	if (sm.randomSeed == 0)
 		sm.randomSeed = 12345u;
@@ -1430,6 +1482,81 @@ Boolean Net_HostLaunchMatch(void)
 	BroadcastENetPacketToClients(NET_CHANNEL_RELIABLE, &sm, sizeof(sm), ENET_PACKET_FLAG_RELIABLE, -1);
 	enet_host_flush(sHost);
 	return true;
+}
+
+Boolean Net_HasRemoteClients(void)
+{
+	if (gIsNetworkHost)
+	{
+		for (int i = 0; i < MAX_PLAYERS; i++)
+		{
+			if (sClientPeers[i] != NULL)
+				return true;
+		}
+		return false;
+	}
+	if (gIsNetworkClient)
+		return sServerPeer != NULL && sConnState == kNetConn_Connected;
+	return false;
+}
+
+short Net_GetLocalPlayerCount(void)
+{
+	if (sMyMachineId == 0)
+		return gNumLocalPlayers > 0 ? gNumLocalPlayers : 1;
+
+	short count = 0;
+	for (int i = 0; i < MAX_PLAYERS && count < MAX_LOCAL_PLAYERS; i++)
+	{
+		if (sLobbyState.players[i].active && sLobbyState.players[i].machineId == sMyMachineId)
+			count++;
+	}
+	return count > 0 ? count : 1;
+}
+
+void Net_HostReturnToLobby(void)
+{
+	if (!gIsNetworkHost || !sHost)
+		return;
+
+	sLobbyState.matchStarted = 0;
+	CompactLobbySlots();
+
+	for (int i = 0; i < MAX_PLAYERS; i++)
+	{
+		if (sLobbyState.players[i].active)
+		{
+			sLobbyState.players[i].vehicleSelected = 0;
+			sLobbyState.players[i].ready = (sLobbyState.players[i].machineId == sMyMachineId) ? 1 : 0;
+		}
+	}
+
+	memset(sClientLevelPreparedSent, 0, sizeof(sClientLevelPreparedSent));
+	Net_ResetGameSyncState();
+	gGameOver = false;
+	gTrackCompleted = false;
+
+	NetReturnToLobbyMsg rtl;
+	memset(&rtl, 0, sizeof(rtl));
+	rtl.msgType = kNetMsgReturnToLobby;
+	rtl.endedMatchId = sCurrentMatchId;
+	BroadcastENetPacketToClients(NET_CHANNEL_RELIABLE, &rtl, sizeof(rtl), ENET_PACKET_FLAG_RELIABLE, -1);
+	BroadcastLobbyState();
+	enet_host_flush(sHost);
+}
+
+void Net_ClientPrepareReturnToLobby(void)
+{
+	if (!gIsNetworkClient)
+		return;
+
+	sClientMatchStarted = false;
+	sClientLevelGo = false;
+	sLobbyState.matchStarted = 0;
+	Net_ResetGameSyncState();
+	ApplyLobbyStateToGlobals();
+	gGameOver = false;
+	gTrackCompleted = false;
 }
 
 int Net_GetConnectedPlayerCount(void)
@@ -2194,7 +2321,8 @@ void Net_HostSendLapOrFinish(short playerNum)
 	ev.msgType = kNetMsgReliableEvent;
 	ev.kind = kNetEvent_LapOrFinish;
 	ev.a = (int8_t)playerNum;
-	ev.b = (int8_t)gPlayerInfo[playerNum].place;
+	ev.b = (playerNum >= 0 && playerNum < MAX_PLAYERS) ? (int8_t)gPlayerInfo[playerNum].place : 0;
+	ev.c = gTrackCompleted ? 1 : 0;
 	BroadcastENetPacketToClients(NET_CHANNEL_RELIABLE, &ev, sizeof(ev), ENET_PACKET_FLAG_RELIABLE, -1);
 }
 

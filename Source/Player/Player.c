@@ -10,6 +10,7 @@
 /****************************/
 
 #include "game.h"
+#include "network.h"
 
 /****************************/
 /*    PROTOTYPES            */
@@ -748,6 +749,8 @@ void PlayerLoseHealth(short p, float damage)
 		if (gNumPlayersEliminated < (gNumTotalPlayers-1))		// if more than 1 player remaining, then post ELIMINATED message
 		{
 			ShowWinLose(p, 0, 0);								// this player is eliminated
+			if (gIsNetworkHost)
+				Net_HostSendElimination(p);
 		}
 	}
 }

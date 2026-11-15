@@ -11,6 +11,7 @@
 /****************************/
 
 #include "game.h"
+#include "camera.h"
 #include <stddef.h>
 
 /****************************/
@@ -168,6 +169,9 @@ Boolean			gHideInfobar = false;
 ObjNode			*gWinLoseString[MAX_PLAYERS];
 
 ObjNode			*gInfobarIconObjs[MAX_SPLITSCREENS][NUM_INFOBAR_ICONTYPES][MAX_SUBICONS];
+
+static ObjNode	*sSpectateBanner[MAX_SPLITSCREENS] = { nil };
+static short	sSpectateBannerTarget[MAX_SPLITSCREENS] = { -1, -1, -1, -1 };
 
 
 #pragma mark -
@@ -490,6 +494,9 @@ void DisposeInfobar(void)
 	}
 
 	SDL_memset(gInfobarIconObjs, 0, sizeof(gInfobarIconObjs));
+	SDL_memset(sSpectateBanner, 0, sizeof(sSpectateBanner));
+	for (int i = 0; i < MAX_SPLITSCREENS; i++)
+		sSpectateBannerTarget[i] = -1;
 }
 
 static void Infobar_MakeIcon(uint8_t type, uint8_t flags)
@@ -572,6 +579,77 @@ static void Infobar_RepositionIcon(ObjNode* theNode)
 	UpdateObjectTransforms(theNode);
 }
 
+static void FormatSafeUpperPlayerName(short slot, char* outBuf, size_t outSize)
+{
+	if (!outBuf || outSize == 0)
+		return;
+	SDL_memset(outBuf, 0, outSize);
+	if (slot < 0 || slot >= MAX_PLAYERS)
+		return;
+
+	size_t j = 0;
+	for (int i = 0; i < 20 && j + 1 < outSize; i++)
+	{
+		char c = gPlayerNameStrings[slot][i];
+		if (c == '\0')
+			break;
+		if ((c >= 'a') && (c <= 'z'))
+			c = 'A' + (c - 'a');
+		if (SDL_strchr(PLAYER_NAME_SAFE_CHARSET, c))
+			outBuf[j++] = c;
+	}
+}
+
+static void SetChainVisible(ObjNode* head, bool visible)
+{
+	for (ObjNode* o = head; o != nil; o = o->ChainNode)
+	{
+		if (!IsObjectBeingDeleted(o))
+			SetObjectVisible(o, visible);
+	}
+}
+
+static void Infobar_MoveSpectateBanner(ObjNode* node)
+{
+	short selfSlot = node->PlayerNum;
+	int pane = (selfSlot >= 0 && selfSlot < MAX_PLAYERS && gPlayerInfo[selfSlot].splitPaneNum >= 0)
+		? gPlayerInfo[selfSlot].splitPaneNum
+		: 0;
+	if (pane < 0 || pane >= MAX_SPLITSCREENS)
+		pane = 0;
+
+	node->Coord.x = gGameView->panes[pane].logicalWidth * 0.5f;
+	node->Coord.y = (gNumSplitScreenPanes > 1) ? 24.0f : 32.0f;
+
+	short target = GetSpectateTargetForPane(pane);
+	Boolean spectatingOther = (target >= 0 && target < MAX_PLAYERS && target != selfSlot);
+
+	if (sSpectateBannerTarget[pane] != target)
+	{
+		sSpectateBannerTarget[pane] = target;
+
+		if (selfSlot >= 0 && selfSlot < MAX_PLAYERS)
+		{
+			SetChainVisible(gWinLoseString[selfSlot], !spectatingOther);
+			SetChainVisible(gFinalPlaceObj[selfSlot], !spectatingOther);
+		}
+
+		if (spectatingOther)
+		{
+			char safeName[32];
+			char banner[64];
+			FormatSafeUpperPlayerName(target, safeName, sizeof(safeName));
+			if (safeName[0] == '\0')
+				SDL_snprintf(safeName, sizeof(safeName), "PLAYER %d", target + 1);
+			SDL_snprintf(banner, sizeof(banner), "%s %s", Localize(STR_SPECTATING), safeName);
+			TextMesh_Update(banner, kTextMeshAlignCenter | kTextMeshAllCaps, node);
+		}
+	}
+
+	SetObjectVisible(node, spectatingOther);
+	UpdateObjectTransforms(node);
+}
+
 static void MakeInfobar(void)
 {
 	int weaponIconType;
@@ -647,6 +725,22 @@ static void MakeInfobar(void)
 				Infobar_MakeIcon(ICON_FLAG, i);
 			}
 			break;
+	}
+
+	for (int pane = 0; pane < gNumSplitScreenPanes && pane < MAX_SPLITSCREENS; pane++)
+	{
+		sSpectateBannerTarget[pane] = -1;
+		NewObjectDefinitionType specDef =
+		{
+			.scale = (gNumSplitScreenPanes > 1) ? 0.35f : 0.45f,
+			.coord = { gGameView->panes[pane].logicalWidth * 0.5f, (gNumSplitScreenPanes > 1) ? 24.0f : 32.0f, 0 },
+			.slot = INFOBAR_SLOT + 1,
+			.player = GetPlayerNum(pane),
+			.moveCall = Infobar_MoveSpectateBanner,
+			.flags = STATUS_BITS_FOR_2D | STATUS_BIT_ONLYSHOWTHISPLAYER | STATUS_BIT_HIDEINPAUSE | STATUS_BIT_HIDDEN,
+			.projection = kProjectionType2DOrthoFullRect,
+		};
+		sSpectateBanner[pane] = TextMesh_New(" ", kTextMeshAlignCenter | kTextMeshAllCaps, &specDef);
 	}
 }
 
@@ -1870,21 +1964,7 @@ void ShowWinLose(short playerNum, Byte mode, short winner)
 					char safePlayerName[32];
 
 					SDL_memset(s, 0, sizeof(s));
-					SDL_memset(safePlayerName, 0, sizeof(safePlayerName));
-
-					int j = 0;
-					for (int i = 0; i < 20; i++)									// copy name
-					{
-						char c = gPlayerNameStrings[winner][i];
-						if (c == '\0')
-							break;
-
-						if ((c >= 'a') && (c <= 'z'))								// convert to UPPER CASE
-							c = 'A' + (c - 'a');
-
-						if (SDL_strchr(PLAYER_NAME_SAFE_CHARSET, c))				// safe characters
-							safePlayerName[j++] = c;
-					}
+					FormatSafeUpperPlayerName(winner, safePlayerName, sizeof(safePlayerName));
 
 					SDL_snprintf(s, sizeof(s), "%s %s", safePlayerName, Localize(STR_3RDPERSON_WINS));	// insert "WINS"
 

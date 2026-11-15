@@ -41,6 +41,8 @@ Boolean				gDrawLensFlare = false;
 
 float				gCameraStartupTimer;
 
+static short		sSpectateTarget[MAX_LOCAL_PLAYERS] = { 0, 1, 2, 3 };
+
 #if 0				// lens flare unused in CMR
 
 static OGLPoint3D	gSunCoord;
@@ -218,6 +220,84 @@ bye:
 
 #pragma mark -
 
+static Boolean IsActiveHumanSpectateTarget(short slot)
+{
+	return slot >= 0 && slot < gNumTotalPlayers &&
+	       !gPlayerInfo[slot].isComputer &&
+	       !gPlayerInfo[slot].isEliminated &&
+	       !gPlayerInfo[slot].raceComplete &&
+	       gPlayerInfo[slot].objNode != nil;
+}
+
+static void UpdateSpectateForPane(int pane, Boolean allowInput)
+{
+	if (pane < 0 || pane >= MAX_LOCAL_PLAYERS)
+		return;
+
+	short selfSlot = GetPlayerNum(pane);
+	if (selfSlot < 0 || selfSlot >= gNumTotalPlayers ||
+	    gGameMode < GAME_MODE_MULTIPLAYERRACE ||
+	    gPlayerInfo[selfSlot].isComputer ||
+	    !gPlayerInfo[selfSlot].onThisMachine ||
+	    !(gPlayerInfo[selfSlot].isEliminated || gPlayerInfo[selfSlot].raceComplete) ||
+	    gTrackCompleted)
+	{
+		sSpectateTarget[pane] = selfSlot;
+		return;
+	}
+
+	short candidates[MAX_PLAYERS];
+	int numCandidates = 0;
+	candidates[numCandidates++] = selfSlot;
+	for (short s = 0; s < gNumTotalPlayers; s++)
+	{
+		if (s != selfSlot && IsActiveHumanSpectateTarget(s))
+			candidates[numCandidates++] = s;
+	}
+
+	int curIdx = -1;
+	for (int i = 0; i < numCandidates; i++)
+	{
+		if (candidates[i] == sSpectateTarget[pane])
+		{
+			curIdx = i;
+			break;
+		}
+	}
+	if (curIdx < 0)
+	{
+		/* Target finished, died, or disconnected: advance to next active human, or own car */
+		curIdx = (numCandidates > 1) ? 1 : 0;
+		sSpectateTarget[pane] = candidates[curIdx];
+	}
+
+	if (allowInput && numCandidates > 1)
+	{
+		if (GetNewNeedState(kNeed_UIUp, pane))
+		{
+			curIdx = (curIdx + numCandidates - 1) % numCandidates;
+			sSpectateTarget[pane] = candidates[curIdx];
+		}
+		else if (GetNewNeedState(kNeed_UIDown, pane))
+		{
+			curIdx = (curIdx + 1) % numCandidates;
+			sSpectateTarget[pane] = candidates[curIdx];
+		}
+	}
+}
+
+short GetSpectateTargetForPane(int pane)
+{
+	if (pane < 0 || pane >= MAX_LOCAL_PLAYERS)
+		return 0;
+
+	short target = sSpectateTarget[pane];
+	if (target >= 0 && target < gNumTotalPlayers && gPlayerInfo[target].objNode != nil)
+		return target;
+
+	return GetPlayerNum(pane);
+}
+
 /*************** INIT CAMERAS ***********************/
 //
 // This MUST be called after the players have been created so that we know
@@ -229,6 +309,9 @@ void InitCameras(void)
 int		p;
 
 	gCameraStartupTimer = 1.0;
+
+	for (p = 0; p < MAX_LOCAL_PLAYERS; p++)
+		sSpectateTarget[p] = GetPlayerNum(p);
 
 	for (p = 0; p < gNumTotalPlayers; p++)              // Both real & CPU players have cameras
 	{
@@ -248,6 +331,9 @@ int		p;
 void UpdateCameras(Boolean priming, Boolean forceRefreshMode)
 {
 int		i;
+
+	for (i = 0; i < gNumSplitScreenPanes && i < MAX_LOCAL_PLAYERS; i++)
+		UpdateSpectateForPane(i, !priming && !gGamePaused);
 
 		/* CHECK FOR CAMERA KEY CONTROLS */
 
@@ -487,9 +573,10 @@ update:
 				/* UPDATE CAMERA INFO */
 				/**********************/
 
-	if (playerInfo->onThisMachine && playerInfo->splitPaneNum >= 0)		// see if this camera is on this machine
+	for (int pane = 0; pane < gNumSplitScreenPanes && pane < MAX_LOCAL_PLAYERS; pane++)
 	{
-		OGL_UpdateCameraFromToUp(&from,&to,&up, playerInfo->splitPaneNum);
+		if (GetSpectateTargetForPane(pane) == playerNum)
+			OGL_UpdateCameraFromToUp(&from,&to,&up, pane);
 	}
 
 

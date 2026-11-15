@@ -21,6 +21,7 @@ typedef struct
 
 void UpdatePlayerCheckpoints(short p);
 void PlayerCompletedRace(short playerNum);
+Boolean AreAllHumansFinishedRace(void);
 void CalcPlayerPlaces(void);
 void NextLap(short p);
 

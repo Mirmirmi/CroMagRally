@@ -14,7 +14,7 @@ extern "C" {
 
 #define NET_DEFAULT_PORT        29400
 #define NET_DISCOVERY_PORT      29401
-#define NET_PROTOCOL_VERSION    2
+#define NET_PROTOCOL_VERSION    3
 #define NET_MAGIC               0x434D524Eu /* 'CMRN' */
 #define NET_MAX_DISCOVERED_HOSTS 16
 #define NET_MAX_PROJECTILES     24
@@ -40,7 +40,8 @@ typedef enum NetMsgType
 	kNetMsgClientInput,
 	kNetMsgHostSnapshot,
 	kNetMsgReliableEvent,
-	kNetMsgPlayerLeave
+	kNetMsgPlayerLeave,
+	kNetMsgReturnToLobby
 } NetMsgType;
 
 typedef enum NetReliableEventKind
@@ -145,8 +146,15 @@ typedef struct NetVehicleSelectMsg
 typedef struct NetStartMatchMsg
 {
 	uint8_t  msgType;
+	uint32_t matchId;
 	uint32_t randomSeed;
 } NetStartMatchMsg;
+
+typedef struct NetReturnToLobbyMsg
+{
+	uint8_t  msgType;
+	uint32_t endedMatchId;
+} NetReturnToLobbyMsg;
 
 typedef struct NetLevelPreparedMsg
 {
@@ -293,6 +301,10 @@ void    Net_GetLocalIPString(char* outBuf, size_t bufSize);
 Boolean Net_StartHostLobby(const char* hostName);
 void    Net_SyncHostLobbySettings(void);
 Boolean Net_HostLaunchMatch(void);
+void    Net_HostReturnToLobby(void);
+void    Net_ClientPrepareReturnToLobby(void);
+Boolean Net_HasRemoteClients(void);
+short   Net_GetLocalPlayerCount(void);
 Boolean Net_HostKickOrRejectCount(void);
 int     Net_GetConnectedPlayerCount(void);
 uint16_t Net_GetMyMachineId(void);
@@ -310,9 +322,11 @@ Boolean Net_ClientHasMatchStarted(void);
 void    Net_DisconnectGracefully(void);
 Boolean Net_CheckMatchLost(void);
 
-/* Screen / Menu entry points (Phase 3) */
+/* Screen / Menu entry points (Phase 3 + Persistent Lobby) */
 Boolean SetupNetworkHosting(void);
 Boolean SetupNetworkJoin(void);
+Boolean ReenterHostLobby(void);
+Boolean ReenterClientLobby(void);
 
 /* Vehicle selection sync */
 void    PlayerBroadcastVehicleType(void);

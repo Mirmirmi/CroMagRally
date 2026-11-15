@@ -1,3 +1,6 @@
+#ifndef CAMERA_H
+#define CAMERA_H
+
 //
 // camera.h
 //
@@ -15,3 +18,6 @@ void InitCameras(void);
 void SetDefaultCameraModeForAllPlayers(void);
 void UpdateCameras(Boolean priming, Boolean forceRefreshMode);
 void DrawLensFlare(void);
+short GetSpectateTargetForPane(int pane);
+
+#endif /* CAMERA_H */

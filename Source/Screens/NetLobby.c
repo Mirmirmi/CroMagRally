@@ -22,11 +22,32 @@ static int                    sPickedHostIdx = -1;
 
 static int                    sLastRenderedPlayers = -1;
 static int                    sLastRenderedHosts = -1;
+static uint8_t                sLastRenderedMode = 255;
+static uint8_t                sLastRenderedTrack = 255;
 static char                   sLastStatusSnapshot[128] = "";
+static Byte                   sHostLobbyMode = GAME_MODE_MULTIPLAYERRACE;
+static Boolean                sExitWhenNoClients = false;
 
 /**********************/
 /*  SHARED HELPERS    */
 /**********************/
+
+static const char* GetTrackLabel(uint8_t mode, uint8_t trackNum)
+{
+	if (IsBattleGameMode(mode))
+	{
+		int idx = (int)trackNum - NUM_RACE_TRACKS;
+		if (idx < 0)
+			idx = 0;
+		if (idx >= (NUM_TRACKS - NUM_RACE_TRACKS))
+			idx = (NUM_TRACKS - NUM_RACE_TRACKS) - 1;
+		return Localize(STR_MPLEVEL_1 + idx);
+	}
+	int idx = (int)trackNum;
+	if (idx < 0 || idx >= NUM_RACE_TRACKS)
+		idx = 0;
+	return Localize(STR_LEVEL_1 + idx);
+}
 
 static const char* GetGameModeLabel(uint8_t mode)
 {
@@ -106,8 +127,21 @@ static const char* GetHostSummaryText(const MenuItem* mi)
 	SDL_snprintf(sDynamicTextBuf[7], sizeof(sDynamicTextBuf[7]),
 	             "%s - %s",
 	             GetGameModeLabel(st->gameMode),
-	             Localize(STR_LEVEL_1 + st->trackNum));
+	             GetTrackLabel(st->gameMode, st->trackNum));
 	return sDynamicTextBuf[7];
+}
+
+static void OnHostModeChanged(const MenuItem* mi)
+{
+	(void)mi;
+	int oldMode = gGameMode;
+	gGameMode = (int)sHostLobbyMode;
+	if (IsBattleGameMode(oldMode) != IsBattleGameMode(gGameMode))
+	{
+		gTrackNum = IsBattleGameMode(gGameMode) ? TRACK_NUM_STONEHENGE : TRACK_NUM_DESERT;
+	}
+	Net_SyncHostLobbySettings();
+	LayoutCurrentMenuAgain();
 }
 
 static void OnHostSettingChanged(const MenuItem* mi)
@@ -131,6 +165,19 @@ static const MenuItem gHostLobbyMenuTree[] =
 	{kMILabel, STR_NULL, .id=5, .getDynamicText=GetPlayerRowText, .getLayoutFlags=IsPlayerRowHidden, .customHeight=0.55f },
 	{kMISpacer, .customHeight=0.5f },
 	{
+		kMICycler2, STR_GAME_MODE, .callback=OnHostModeChanged, .cycler=
+		{
+			.valuePtr=&sHostLobbyMode, .choices=
+			{
+				{STR_RACE,        GAME_MODE_MULTIPLAYERRACE},
+				{STR_TAG1,        GAME_MODE_TAG1},
+				{STR_TAG2,        GAME_MODE_TAG2},
+				{STR_SURVIVAL,    GAME_MODE_SURVIVAL},
+				{STR_CAPTUREFLAG, GAME_MODE_CAPTUREFLAG},
+			}
+		}
+	},
+	{
 		kMICycler2, STR_CPU_PLAYERS, .callback=OnHostSettingChanged, .cycler=
 		{
 			.valuePtr=&gMultiplayerCPUs, .choices=
@@ -153,8 +200,9 @@ static const MenuItem gHostLobbyMenuTree[] =
 		}
 	},
 	{kMISpacer, .customHeight=0.5f },
-	{kMIPick, STR_START_MATCH, .id=1, .next='EXIT' },
-	{kMIPick, STR_CANCEL,      .id=0, .next='EXIT' },
+	{kMIPick, STR_CHANGE_TRACK, .id=2, .next='EXIT' },
+	{kMIPick, STR_START_MATCH,  .id=1, .next='EXIT' },
+	{kMIPick, STR_CANCEL,       .id=0, .next='EXIT' },
 	{ .type=kMISENTINEL }
 };
 
@@ -163,11 +211,64 @@ static void UpdateHostLobbyMenu(void)
 	MoveObjects();
 	Net_PollLobby();
 
+	if (sExitWhenNoClients && !Net_HasRemoteClients())
+	{
+		KillMenu(0);
+		return;
+	}
+
 	int count = Net_GetConnectedPlayerCount();
 	if (count != sLastRenderedPlayers)
 	{
 		sLastRenderedPlayers = count;
 		LayoutCurrentMenuAgain();
+	}
+}
+
+static Boolean RunHostLobbyMenu(Boolean exitWhenNoClients)
+{
+	sExitWhenNoClients = exitWhenNoClients;
+
+	while (true)
+	{
+		if (sExitWhenNoClients && !Net_HasRemoteClients())
+		{
+			ShutdownNetworkManager();
+			return true;
+		}
+
+		sHostLobbyMode = (Byte)gGameMode;
+		sLastRenderedPlayers = Net_GetConnectedPlayerCount();
+
+		SetupNetLobbyView();
+
+		MenuStyle style = kDefaultMenuStyle;
+		style.canBackOutOfRootMenu = true;
+		style.rowHeight = 36;
+
+		int pick = StartMenu(gHostLobbyMenuTree, &style, UpdateHostLobbyMenu, DrawObjects);
+
+		CleanupNetLobbyView();
+
+		if (pick == 2)
+		{
+			int prevTrack = gTrackNum;
+			if (SelectSingleTrack())
+				gTrackNum = prevTrack;
+			Net_SyncHostLobbySettings();
+			Net_PollLobby();
+			continue;
+		}
+
+		if (pick != 1)
+		{
+			Net_DisconnectGracefully();
+			ShutdownNetworkManager();
+			return true;
+		}
+
+		Net_HostLaunchMatch();
+		return false;
 	}
 }
 
@@ -182,26 +283,19 @@ Boolean SetupNetworkHosting(void)
 		return true;
 	}
 
-	sLastRenderedPlayers = Net_GetConnectedPlayerCount();
+	return RunHostLobbyMenu(false);
+}
 
-	SetupNetLobbyView();
-
-	MenuStyle style = kDefaultMenuStyle;
-	style.canBackOutOfRootMenu = true;
-	style.rowHeight = 36;
-
-	int pick = StartMenu(gHostLobbyMenuTree, &style, UpdateHostLobbyMenu, DrawObjects);
-
-	CleanupNetLobbyView();
-
-	if (pick != 1)
+Boolean ReenterHostLobby(void)
+{
+	if (!Net_HasRemoteClients())
 	{
 		ShutdownNetworkManager();
 		return true;
 	}
 
-	Net_HostLaunchMatch();
-	return false;
+	Net_HostReturnToLobby();
+	return RunHostLobbyMenu(true);
 }
 
 /**********************/
@@ -295,7 +389,7 @@ static const char* GetClientStatusText(const MenuItem* mi)
 		SDL_snprintf(sDynamicTextBuf[6], sizeof(sDynamicTextBuf[6]),
 		             "%s - %s",
 		             GetGameModeLabel(st->gameMode),
-		             Localize(STR_LEVEL_1 + st->trackNum));
+		             GetTrackLabel(st->gameMode, st->trackNum));
 	}
 	else
 	{
@@ -340,14 +434,37 @@ static void UpdateClientWaitMenu(void)
 		return;
 	}
 
+	const NetLobbyStateMsg* st = Net_GetLobbyState();
 	int count = Net_GetConnectedPlayerCount();
 	const char* s = status ? status : "";
-	if (count != sLastRenderedPlayers || SDL_strcmp(s, sLastStatusSnapshot) != 0)
+	if (count != sLastRenderedPlayers ||
+	    st->gameMode != sLastRenderedMode ||
+	    st->trackNum != sLastRenderedTrack ||
+	    SDL_strcmp(s, sLastStatusSnapshot) != 0)
 	{
 		sLastRenderedPlayers = count;
+		sLastRenderedMode = st->gameMode;
+		sLastRenderedTrack = st->trackNum;
 		SDL_strlcpy(sLastStatusSnapshot, s, sizeof(sLastStatusSnapshot));
 		LayoutCurrentMenuAgain();
 	}
+}
+
+static int RunClientWaitRoom(void)
+{
+	MenuStyle style = kDefaultMenuStyle;
+	style.canBackOutOfRootMenu = true;
+	style.rowHeight = 36;
+
+	sLastRenderedPlayers = -1;
+	sLastRenderedMode = 255;
+	sLastRenderedTrack = 255;
+	sLastStatusSnapshot[0] = '\0';
+
+	SetupNetLobbyView();
+	int waitPick = StartMenu(gClientWaitMenuTree, &style, UpdateClientWaitMenu, DrawObjects);
+	CleanupNetLobbyView();
+	return waitPick;
 }
 
 Boolean SetupNetworkJoin(void)
@@ -398,12 +515,7 @@ Boolean SetupNetworkJoin(void)
 			continue;
 		}
 
-		sLastRenderedPlayers = -1;
-		sLastStatusSnapshot[0] = '\0';
-
-		SetupNetLobbyView();
-		int waitPick = StartMenu(gClientWaitMenuTree, &style, UpdateClientWaitMenu, DrawObjects);
-		CleanupNetLobbyView();
+		int waitPick = RunClientWaitRoom();
 
 		if (waitPick == 1)
 		{
@@ -416,8 +528,42 @@ Boolean SetupNetworkJoin(void)
 			Net_GetConnectionState(&status);
 			DoAlert("Connection ended: %s", status ? status : "Disconnected");
 		}
+		else
+		{
+			Net_DisconnectGracefully();
+		}
 
 		ShutdownNetworkManager();
 		/* Return to LAN browser */
 	}
+}
+
+Boolean ReenterClientLobby(void)
+{
+	Net_ClientPrepareReturnToLobby();
+	if (!Net_HasRemoteClients())
+	{
+		ShutdownNetworkManager();
+		return true;
+	}
+
+	int waitPick = RunClientWaitRoom();
+	if (waitPick == 1)
+	{
+		return false; /* Host launched next match! */
+	}
+
+	if (waitPick == 2)
+	{
+		const char* status = NULL;
+		Net_GetConnectionState(&status);
+		DoAlert("Connection ended: %s", status ? status : "Disconnected");
+	}
+	else
+	{
+		Net_DisconnectGracefully();
+	}
+
+	ShutdownNetworkManager();
+	return true;
 }

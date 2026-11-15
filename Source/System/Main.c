@@ -234,7 +234,11 @@ static Boolean PlayGame(void)
 
 
 	if (bailed)
+	{
+		if (gNetGameInProgress)
+			EndNetworkGame();
 		return true;
+	}
 
 
 		/* UPDATE ANY SAVED PLAYER FILE THAT'S ACTIVE */
@@ -1407,7 +1411,10 @@ short				numPanes;
 
 static void CleanupLevel(void)
 {
-	EndNetworkGame();
+	Boolean keepNetLobby = (gNetGameInProgress && !gGameOver);
+	if (!keepNetLobby)
+		EndNetworkGame();
+
 	StopAllEffectChannels();
  	EmptySplineObjectList();
 	DisposeInfobar();
@@ -1424,8 +1431,18 @@ static void CleanupLevel(void)
 	OGL_DisposeGameView();	// do this last!
 	DisposeSoundBank(SOUNDBANK_LEVELSPECIFIC);
 
-	gNumRealPlayers = 1;					// reset at end of level to be safe
-	gNumLocalPlayers = 1;
+	if (keepNetLobby)
+	{
+		gNumRealPlayers = (short)Net_GetConnectedPlayerCount();
+		gNumLocalPlayers = Net_GetLocalPlayerCount();
+		gGameOver = false;
+		gTrackCompleted = false;
+	}
+	else
+	{
+		gNumRealPlayers = 1;					// reset at end of level to be safe
+		gNumLocalPlayers = 1;
+	}
 	gActiveSplitScreenMode = SPLITSCREEN_MODE_NONE;
 }
 
@@ -1451,6 +1468,16 @@ short	i,t,winner;
 
 	switch(gGameMode)
 	{
+		case	GAME_MODE_MULTIPLAYERRACE:
+				if (gNetGameInProgress && AreAllHumansFinishedRace())
+				{
+					gTrackCompleted = true;
+					gTrackCompletedCoolDownTimer = TRACK_COMPLETE_COOLDOWN_TIME;
+					if (gIsNetworkHost)
+						Net_HostSendLapOrFinish(-1);
+				}
+				break;
+
 				/****************************/
 				/* TAG - DONT WANT TO BE IT */
 				/****************************/
@@ -1728,8 +1755,34 @@ void GameMain(void)
 		PlaySong(SONG_THEME, true);
 		DoMainMenuScreen();
 
-		PlayGame();
-		ShutdownNetworkManager();
+		if (gNetGameInProgress)
+		{
+			while (gNetGameInProgress)
+			{
+				if (PlayGame())
+					break;
+				if (!gNetGameInProgress)
+					break;
+
+				PlaySong(SONG_THEME, true);
+				if (gIsNetworkHost)
+				{
+					if (ReenterHostLobby())
+						break;
+				}
+				else
+				{
+					if (ReenterClientLobby())
+						break;
+				}
+			}
+			ShutdownNetworkManager();
+		}
+		else
+		{
+			PlayGame();
+			ShutdownNetworkManager();
+		}
 	}
 }
 
