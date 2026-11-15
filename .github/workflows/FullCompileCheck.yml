@@ -4,10 +4,10 @@ on:
   workflow_dispatch:
   push:
     branches-ignore:
-      - master
+      - main
   pull_request:
     branches:
-      - master
+      - main
 
 concurrency:
   group: full-compile-${{ github.ref }}
@@ -66,3 +66,9 @@ jobs:
       - name: Configure and build (Default compiler)
         if: "!matrix.platform.cc"
         run: python3 build.py --configure --build
+
+      - name: Run tests
+        if: runner.os != 'Windows'
+        env:
+          DYLD_FRAMEWORK_PATH: ${{ github.workspace }}/extern
+        run: ctest --test-dir build -C RelWithDebInfo --output-on-failure

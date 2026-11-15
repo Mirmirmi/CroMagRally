@@ -341,9 +341,13 @@ class MacProject(Project):
     def package(self):
         release_config = self.build_configs[0]
         appdir = f"{self.dir_name}/{release_config}"
+        app_bundle = f"{appdir}/{game_name_human}.app"
 
         # Human-friendly name for .app
-        os.rename(f"{appdir}/{game_name}.app", f"{appdir}/{game_name_human}.app")
+        os.rename(f"{appdir}/{game_name}.app", app_bundle)
+
+        if "CODE_SIGN_IDENTITY" not in os.environ:
+            call(["codesign", "--force", "--deep", "--sign", "-", app_bundle])
 
         self.copy_documentation(appdir)
 
