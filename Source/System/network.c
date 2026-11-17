@@ -16,7 +16,9 @@
 	#include <arpa/inet.h>
 	#include <fcntl.h>
 	#include <unistd.h>
+#ifndef __EMSCRIPTEN__
 	#include <ifaddrs.h>
+#endif
 	#include <errno.h>
 #endif
 
@@ -227,7 +229,7 @@ void Net_GetLocalIPString(char* outBuf, size_t bufSize)
 
 	SDL_strlcpy(outBuf, "127.0.0.1", bufSize);
 
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
 	struct ifaddrs* ifaddr = NULL;
 	if (getifaddrs(&ifaddr) == 0 && ifaddr != NULL)
 	{
@@ -251,6 +253,7 @@ void Net_GetLocalIPString(char* outBuf, size_t bufSize)
 	}
 #endif
 
+#ifndef __EMSCRIPTEN__
 	/* Fallback UDP getsockname trick (no traffic sent) */
 	NetUDPSocket tmpSock = socket(AF_INET, SOCK_DGRAM, 0);
 	if (tmpSock != NET_INVALID_SOCKET)
@@ -276,6 +279,7 @@ void Net_GetLocalIPString(char* outBuf, size_t bufSize)
 		}
 		NetCloseSocket(tmpSock);
 	}
+#endif
 }
 
 static void SendENetPacket(ENetPeer* peer, uint8_t channel, const void* data, size_t size, enet_uint32 flags)

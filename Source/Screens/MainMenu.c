@@ -21,7 +21,9 @@
 
 static void SetupMainMenuScreen(void);
 
+#ifndef __EMSCRIPTEN__
 static void OnPickQuitApplication(const MenuItem* mi);
+#endif
 static void OnPickCredits(const MenuItem* mi);
 static void OnConfirmPlayMenu(const MenuItem* mi);
 static void OnPickGameMode(const MenuItem* mi);
@@ -67,14 +69,18 @@ static const MenuItem gMainMenuTree[] =
 	{kMIPick, STR_NEW_GAME,		.next='play', },
 	{kMIPick, STR_OPTIONS,		.next='optn', },
 	{kMIPick, STR_EXTRAS,		.next='xtra', },
+#ifndef __EMSCRIPTEN__
 	{kMIPick, STR_QUIT,			.next='EXIT', .callback=OnPickQuitApplication, .id=MENU_EXITCODE_QUITGAME },
+#endif
 
 	{ .id='play' },
 	{kMIPick, STR_1PLAYER,	.id=1, .callback=OnConfirmPlayMenu, .next='spgm' },
 	{kMIPick, STR_2PLAYER,	.id=2, .callback=OnConfirmPlayMenu, .next='mpgm' },
 	{kMIPick, STR_3PLAYER,	.id=3, .callback=OnConfirmPlayMenu, .next='mpgm' },
 	{kMIPick, STR_4PLAYER,	.id=4, .callback=OnConfirmPlayMenu, .next='mpgm' },
+#ifndef __EMSCRIPTEN__
 	{kMIPick, STR_NET_GAME,	.id=0, .callback=OnConfirmPlayMenu, .next='netg' },
+#endif
 
 	{ .id='optn' },
 	{
@@ -215,6 +221,8 @@ static void UpdateMainMenuScreen(void)
 
 	if (GetCurrentMenu() == 'titl')		// root menu page
 	{
+		SavePrefs();
+
 				/* INITIATE SRD */
 
 		if (GetMenuIdleTime() > DEMO_DELAY || GetNewKeyState(SDL_SCANCODE_F1))
@@ -415,12 +423,14 @@ OGLVector3D			fillDirection2 = { -1, -.2, -.5 };
 
 #pragma mark - Menu Callbacks
 
+#ifndef __EMSCRIPTEN__
 static void OnPickQuitApplication(const MenuItem* mi)
 {
 	gGameView->fadeSound = true;
 	gGameView->fadePillarbox = true;
 	gGameView->fadeOutDuration = .3f;
 }
+#endif
 
 static void OnPickCredits(const MenuItem* mi)
 {

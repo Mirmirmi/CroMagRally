@@ -216,6 +216,7 @@ void DoPaused(void)
 	ReadKeyboard();
 
 	int outcome = StartMenu(gPauseMenuTree, &style, UpdatePausedMenuCallback, DrawTerrain);
+	SavePrefs();
 
 	gGamePaused = false;
 	PauseAllChannels(false);

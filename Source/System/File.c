@@ -14,6 +14,29 @@
 #include "bones.h"
 #include "lzss.h"
 #include <stddef.h>
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+
+EM_JS(void, Web_FlushIDBFS, (void), {
+	if (typeof FS === 'undefined' || !FS.syncfs) return;
+	if (window.__croMagSyncing) {
+		window.__croMagSyncPending = true;
+		return;
+	}
+	function runSync() {
+		window.__croMagSyncing = true;
+		window.__croMagSyncPending = false;
+		FS.syncfs(false, function (err) {
+			window.__croMagSyncing = false;
+			if (err) console.warn('IDBFS flush error:', err);
+			if (window.__croMagSyncPending) {
+				runSync();
+			}
+		});
+	}
+	runSync();
+});
+#endif
 
 /****************************/
 /*    PROTOTYPES            */
@@ -604,6 +627,9 @@ void SavePrefs(void)
 	SaveUserDataFile(PREFS_FILENAME, PREFS_MAGIC, sizeof(PrefsType), (Ptr)&gGamePrefs);
 
 	SDL_memcpy(&gDiskShadowPrefs, &gGamePrefs, sizeof(gGamePrefs));
+#ifdef __EMSCRIPTEN__
+	Web_FlushIDBFS();
+#endif
 }
 
 #pragma mark -
@@ -680,11 +706,16 @@ float GetTotalTournamentTime(void)
 OSErr SaveScoreboardFile(void)
 {
 	_Static_assert(sizeof(ScoreboardRecord) == 64, "Ideally, a ScoreboardRecord should be 64 bytes long");
-	return SaveUserDataFile(
+	OSErr err = SaveUserDataFile(
 			"Scoreboard",
 			SCOREBOARD_MAGIC,
 			sizeof(gScoreboard),
 			(Ptr) &gScoreboard);
+#ifdef __EMSCRIPTEN__
+	if (err == noErr)
+		Web_FlushIDBFS();
+#endif
+	return err;
 }
 
 OSErr LoadScoreboardFile(void)

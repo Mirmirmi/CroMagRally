@@ -13,7 +13,11 @@
 #include "game.h"
 #include "stb_image.h"
 #include "pillarbox.h"
+#ifndef __EMSCRIPTEN__
 #include <SDL3/SDL_opengl.h>
+#else
+#include <emscripten.h>
+#endif
 #include <math.h>
 
 extern SDL_Window*		gSDLWindow;
@@ -381,6 +385,10 @@ static void OGL_DisposeDrawContext(void)
 	if (!gAGLContext)
 		return;
 
+#ifdef __EMSCRIPTEN__
+	shim_glShutdown();
+#endif
+
 	SDL_GL_MakeCurrent(gSDLWindow, NULL);		// make context not current
 	SDL_GL_DestroyContext(gAGLContext);			// nuke context
 
@@ -535,6 +543,12 @@ GLfloat	ambient[4];
 
 /******************* OGL DRAW SCENE *********************/
 
+#ifdef __EMSCRIPTEN__
+EM_ASYNC_JS(void, Web_YieldFrame, (void), {
+	await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+});
+#endif
+
 void OGL_DrawScene(void (*drawRoutine)(void))
 {
 	GAME_ASSERT(gGameView);										// make sure it's legit
@@ -649,6 +663,9 @@ void OGL_DrawScene(void (*drawRoutine)(void))
            /* SWAP THE BUFFS */
 
 	SDL_GL_SwapWindow(gSDLWindow);					// end render loop
+#ifdef __EMSCRIPTEN__
+	Web_YieldFrame();
+#endif
 }
 
 

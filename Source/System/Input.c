@@ -4,6 +4,16 @@
 
 #include "game.h"
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+
+EM_JS(void, Web_ResumeAudioContext, (void), {
+	if (typeof SDL3 !== 'undefined' && SDL3.audioContext && SDL3.audioContext.state === 'suspended') {
+		SDL3.audioContext.resume();
+	}
+});
+#endif
+
 extern SDL_Window* gSDLWindow;
 
 /***************/
@@ -263,7 +273,8 @@ void DoSDLMaintenance(void)
 				return;
 
 			case SDL_EVENT_WINDOW_RESIZED:
-				// QD3D_OnWindowResized(event.window.data1, event.window.data2);
+			case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+				SDL_GetWindowSizeInPixels(gSDLWindow, &gGameWindowWidth, &gGameWindowHeight);
 				break;
 
 			case SDL_EVENT_TEXT_INPUT:
@@ -293,11 +304,23 @@ void DoSDLMaintenance(void)
 
 			case SDL_EVENT_KEY_DOWN:
 				gUserPrefersGamepad = false;
+#ifdef __EMSCRIPTEN__
+				Web_ResumeAudioContext();
+#endif
+				break;
+
+			case SDL_EVENT_MOUSE_BUTTON_DOWN:
+#ifdef __EMSCRIPTEN__
+				Web_ResumeAudioContext();
+#endif
 				break;
 
 			case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
 			case SDL_EVENT_GAMEPAD_BUTTON_UP:
 				gUserPrefersGamepad = true;
+#ifdef __EMSCRIPTEN__
+				Web_ResumeAudioContext();
+#endif
 				break;
 		}
 	}

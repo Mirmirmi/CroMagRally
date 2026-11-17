@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <link rel="icon" href="data:,">
+  <title>Cro-Mag Rally</title>
+  <style>
+    :root {
+      --bg: #120d09;
+      --panel: rgba(28, 20, 14, 0.94);
+      --border: #5b3b1e;
+      --accent: #f08a24;
+      --accent-hover: #ff9f3f;
+      --text: #f7efe4;
+      --muted: #b9a48d;
+      --danger: #e2554f;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    #stage {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: radial-gradient(circle at 50% 35%, #2b1d12 0%, #120d09 75%);
+    }
+    canvas#canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      outline: none;
+      background: #000;
+    }
+    #hud-controls {
+      position: fixed;
+      top: 12px;
+      right: 12px;
+      z-index: 20;
+      display: none;
+      gap: 8px;
+    }
+    #hud-controls.visible {
+      display: flex;
+    }
+    .hud-btn {
+      appearance: none;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      background: rgba(18, 13, 9, 0.72);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 7px 12px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      backdrop-filter: blur(6px);
+      transition: background 0.15s ease, border-color 0.15s ease;
+    }
+    .hud-btn:hover {
+      background: rgba(240, 138, 36, 0.25);
+      border-color: var(--accent);
+    }
+    #overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 30;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background: radial-gradient(circle at 50% 35%, rgba(46, 30, 17, 0.92) 0%, rgba(14, 10, 7, 0.98) 78%);
+    }
+    #overlay.hidden {
+      display: none;
+    }
+    .card {
+      width: min(520px, 100%);
+      background: var(--panel);
+      border: 2px solid var(--border);
+      border-radius: 16px;
+      padding: 32px 28px;
+      text-align: center;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.65);
+    }
+    .eyebrow {
+      font-size: 12px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--accent);
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    h1 {
+      margin: 0 0 10px;
+      font-size: clamp(28px, 5vw, 38px);
+      line-height: 1.1;
+      letter-spacing: 0.02em;
+    }
+    .subtitle {
+      margin: 0 0 24px;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.5;
+    }
+    .play-btn {
+      appearance: none;
+      width: 100%;
+      border: none;
+      border-radius: 12px;
+      padding: 15px 24px;
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: 0.03em;
+      color: #1b1006;
+      background: linear-gradient(180deg, #ffb24a 0%, var(--accent) 100%);
+      cursor: pointer;
+      box-shadow: 0 8px 24px rgba(240, 138, 36, 0.35);
+      transition: transform 0.12s ease, filter 0.12s ease;
+    }
+    .play-btn:hover {
+      filter: brightness(1.06);
+      transform: translateY(-1px);
+    }
+    .play-btn:active {
+      transform: translateY(1px);
+    }
+    .controls-grid {
+      margin-top: 20px;
+      padding-top: 16px;
+      border-top: 1px solid rgba(255, 255, 255, 0.09);
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px 14px;
+      text-align: left;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .controls-grid strong {
+      color: var(--text);
+    }
+    #progress-section {
+      display: none;
+      margin-top: 8px;
+    }
+    #progress-section.active {
+      display: block;
+    }
+    .progress-track {
+      width: 100%;
+      height: 14px;
+      background: rgba(0, 0, 0, 0.45);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      overflow: hidden;
+      margin-bottom: 12px;
+    }
+    #progress-fill {
+      width: 0%;
+      height: 100%;
+      background: linear-gradient(90deg, #d96b14, #ffb854);
+      transition: width 0.15s ease-out;
+    }
+    #status-text {
+      font-size: 14px;
+      color: var(--muted);
+      min-height: 20px;
+    }
+    #fatal-banner {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 50;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background: rgba(12, 8, 6, 0.92);
+    }
+    #fatal-banner.visible {
+      display: flex;
+    }
+    #fatal-banner .card {
+      border-color: var(--danger);
+    }
+    #fatal-message {
+      margin: 12px 0 20px;
+      padding: 12px;
+      border-radius: 8px;
+      background: rgba(226, 85, 79, 0.12);
+      border: 1px solid rgba(226, 85, 79, 0.35);
+      color: #ffd7d5;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 13px;
+      word-break: break-word;
+      text-align: left;
+    }
+    #alert-toast {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 40;
+      max-width: min(560px, calc(100vw - 32px));
+      padding: 10px 16px;
+      border-radius: 10px;
+      background: rgba(28, 20, 14, 0.95);
+      border: 1px solid var(--accent);
+      color: var(--text);
+      font-size: 14px;
+      display: none;
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
+    }
+    #alert-toast.visible {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div id="stage">
+    <canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
+  </div>
+
+  <div id="hud-controls">
+    <button id="fullscreen-btn" class="hud-btn" type="button">Fullscreen</button>
+  </div>
+
+  <div id="overlay">
+    <div class="card">
+      <div class="eyebrow">WebGL2 Browser Edition</div>
+      <h1>Cro-Mag Rally</h1>
+      <p class="subtitle">Prehistoric kart racing in your browser with persistent local saves and gamepad support.</p>
+
+      <div id="gate-section">
+        <button id="play-btn" class="play-btn" type="button">Click to Play</button>
+        <div class="controls-grid">
+          <div><strong>Drive / Steer:</strong> Arrows / WASD</div>
+          <div><strong>Fire Weapon:</strong> Space</div>
+          <div><strong>Menus / Select:</strong> Enter / Space</div>
+          <div><strong>Back / Pause:</strong> Esc</div>
+        </div>
+      </div>
+
+      <div id="progress-section">
+        <div class="progress-track">
+          <div id="progress-fill"></div>
+        </div>
+        <div id="status-text">Initializing WebAssembly engine...</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="fatal-banner">
+    <div class="card">
+      <div class="eyebrow" style="color: var(--danger);">Engine Error</div>
+      <h1 style="font-size: 24px;">Unable to Run Cro-Mag Rally</h1>
+      <div id="fatal-message"></div>
+      <button class="play-btn" type="button" onclick="location.reload()">Reload Page</button>
+    </div>
+  </div>
+
+  <div id="alert-toast"></div>
+
+  <script>
+    (function () {
+      const canvas = document.getElementById('canvas');
+      const overlay = document.getElementById('overlay');
+      const gateSection = document.getElementById('gate-section');
+      const progressSection = document.getElementById('progress-section');
+      const progressFill = document.getElementById('progress-fill');
+      const statusText = document.getElementById('status-text');
+      const playBtn = document.getElementById('play-btn');
+      const hudControls = document.getElementById('hud-controls');
+      const fullscreenBtn = document.getElementById('fullscreen-btn');
+      const fatalBanner = document.getElementById('fatal-banner');
+      const fatalMessage = document.getElementById('fatal-message');
+      const alertToast = document.getElementById('alert-toast');
+
+      let started = false;
+      let bootCompleted = false;
+      let totalDeps = 0;
+      let alertTimer = null;
+
+      window.__croMagShowFatal = function (msg) {
+        fatalMessage.textContent = String(msg || 'Unknown fatal error');
+        fatalBanner.classList.add('visible');
+        overlay.classList.add('hidden');
+      };
+
+      window.__croMagShowAlert = function (msg) {
+        alertToast.textContent = String(msg || '');
+        alertToast.classList.add('visible');
+        clearTimeout(alertTimer);
+        alertTimer = setTimeout(function () {
+          alertToast.classList.remove('visible');
+        }, 4500);
+      };
+
+      function unlockWebAudio() {
+        try {
+          const Ctx = window.AudioContext || window.webkitAudioContext;
+          if (!Ctx) return;
+          const ctx = new Ctx();
+          if (ctx.state === 'suspended') {
+            ctx.resume().catch(function () {});
+          }
+          const buf = ctx.createBuffer(1, 1, 22050);
+          const src = ctx.createBufferSource();
+          src.buffer = buf;
+          src.connect(ctx.destination);
+          src.start(0);
+          setTimeout(function () { ctx.close().catch(function () {}); }, 250);
+        } catch (e) {
+          // Non-fatal: SDL3 will create and resume its own AudioContext on input.
+        }
+      }
+
+      function hideOverlayWhenReady() {
+        if (bootCompleted) return;
+        bootCompleted = true;
+        overlay.classList.add('hidden');
+        hudControls.classList.add('visible');
+        canvas.focus();
+      }
+
+      function updateProgress(text) {
+        if (!text) {
+          progressFill.style.width = '100%';
+          statusText.textContent = 'Starting game...';
+          return;
+        }
+        const m = text.match(/([^(]+)\((\d+)\/(\d+)\)/);
+        if (m) {
+          const loaded = parseInt(m[2], 10);
+          const total = parseInt(m[3], 10);
+          if (total > 0) {
+            const pct = Math.min(100, Math.round((loaded / total) * 100));
+            const mbLoaded = (loaded / (1024 * 1024)).toFixed(1);
+            const mbTotal = (total / (1024 * 1024)).toFixed(1);
+            progressFill.style.width = pct + '%';
+            statusText.textContent = m[1].trim() + ' ' + mbLoaded + ' / ' + mbTotal + ' MB (' + pct + '%)';
+            return;
+          }
+        }
+        statusText.textContent = text;
+      }
+
+      fullscreenBtn.addEventListener('click', function () {
+        if (!document.fullscreenElement) {
+          (canvas.requestFullscreen ? canvas.requestFullscreen() : document.documentElement.requestFullscreen()).catch(function () {});
+        } else {
+          document.exitFullscreen().catch(function () {});
+        }
+        canvas.focus();
+      });
+
+      canvas.addEventListener('pointerdown', function () {
+        canvas.focus();
+      });
+
+      playBtn.addEventListener('click', function () {
+        if (started) return;
+        started = true;
+
+        if (!window.WebGL2RenderingContext) {
+          window.__croMagShowFatal('WebGL2 is required to play Cro-Mag Rally in the browser.');
+          return;
+        }
+
+        unlockWebAudio();
+        gateSection.style.display = 'none';
+        progressSection.classList.add('active');
+        statusText.textContent = 'Loading WebAssembly engine & data...';
+
+        window.Module = {
+          canvas: canvas,
+          print: function (text) { console.log(text); },
+          printErr: function (text) { console.error(text); },
+          setStatus: function (text) {
+            updateProgress(text);
+            if (text === '') {
+              hideOverlayWhenReady();
+            }
+          },
+          monitorRunDependencies: function (left) {
+            totalDeps = Math.max(totalDeps, left);
+            if (left > 0 && totalDeps > 0) {
+              const pct = Math.round(((totalDeps - left) / totalDeps) * 100);
+              progressFill.style.width = pct + '%';
+            }
+            if (left === 0 && window.Module.calledRun) {
+              hideOverlayWhenReady();
+            }
+          },
+          onRuntimeInitialized: function () {
+            hideOverlayWhenReady();
+          },
+          onAbort: function (what) {
+            window.__croMagShowFatal(what || 'WebAssembly runtime aborted.');
+          }
+        };
+
+        window.onerror = function (msg) {
+          if (!bootCompleted) {
+            window.__croMagShowFatal(msg);
+          }
+        };
+
+        const script = document.createElement('script');
+        script.src = 'CroMagRally.js';
+        script.async = true;
+        script.onerror = function () {
+          window.__croMagShowFatal('Failed to download CroMagRally.js.');
+        };
+        document.body.appendChild(script);
+      });
+    })();
+  </script>
+</body>
+</html>

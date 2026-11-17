@@ -5,6 +5,11 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#include <cstdlib>
+#endif
+
 #include "Pomme.h"
 #include "PommeInit.h"
 #include "PommeFiles.h"
@@ -21,6 +26,18 @@ extern "C"
 
 static fs::path FindGameData(const char* executablePath)
 {
+#ifdef __EMSCRIPTEN__
+	(void)executablePath;
+	fs::path dataPath = "/Data";
+	gDataSpec = Pomme::Files::HostPathToFSSpec(dataPath / "System");
+	FSSpec someDataFileSpec;
+	OSErr iErr = FSMakeFSSpec(gDataSpec.vRefNum, gDataSpec.parID, ":System:gamecontrollerdb.txt", &someDataFileSpec);
+	if (iErr)
+	{
+		throw std::runtime_error("Couldn't find /Data/System/gamecontrollerdb.txt in virtual filesystem.");
+	}
+	return dataPath;
+#else
 	fs::path dataPath;
 
 	int attemptNum = 0;
@@ -68,6 +85,7 @@ tryAgain:
 	}
 
 	return dataPath;
+#endif
 }
 
 static void ParseCommandLine(int argc, char** argv)
@@ -117,6 +135,33 @@ static void ParseCommandLine(int argc, char** argv)
 	}
 }
 
+#ifdef __EMSCRIPTEN__
+EM_ASYNC_JS(void, Web_InitIDBFS, (const char* configDir), {
+	const dir = UTF8ToString(configDir);
+	try {
+		FS.mkdirTree(dir);
+		FS.mount(IDBFS, {}, dir);
+		await new Promise((resolve) => {
+			FS.syncfs(true, (err) => {
+				if (err) console.warn('IDBFS initial sync warning:', err);
+				resolve();
+			});
+		});
+	} catch (e) {
+		console.warn('IDBFS unavailable, falling back to ephemeral MEMFS:', e);
+	}
+});
+
+EM_JS(void, Web_ShowFatalError, (const char* message), {
+	const text = UTF8ToString(message);
+	if (typeof window !== 'undefined' && typeof window.__croMagShowFatal === 'function') {
+		window.__croMagShowFatal(text);
+	} else {
+		console.error('Fatal error:', text);
+	}
+});
+#endif
+
 static void Boot(int argc, char** argv)
 {
 	SDL_SetAppMetadata(GAME_FULL_NAME, GAME_VERSION, GAME_IDENTIFIER);
@@ -127,6 +172,15 @@ static void Boot(int argc, char** argv)
 #endif
 
 	ParseCommandLine(argc, argv);
+
+#ifdef __EMSCRIPTEN__
+	{
+		const char* xdg = std::getenv("XDG_CONFIG_HOME");
+		const char* home = std::getenv("HOME");
+		std::string configDir = xdg ? xdg : (std::string(home ? home : "/home/web_user") + "/.config");
+		Web_InitIDBFS(configDir.c_str());
+	}
+#endif
 
 	// Start our "machine"
 	Pomme::Init();
@@ -146,9 +200,15 @@ retryVideo:
 	}
 
 	// Create window
+#ifdef __EMSCRIPTEN__
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+#else
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+#endif
 
 	gCurrentAntialiasingLevel = gGamePrefs.antialiasingLevel;
 	if (gCurrentAntialiasingLevel != 0)
@@ -237,7 +297,11 @@ int main(int argc, char** argv)
 	if (!success)
 	{
 		SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Uncaught exception: %s", uncaught.c_str());
+#ifdef __EMSCRIPTEN__
+		Web_ShowFatalError(uncaught.c_str());
+#else
 		SDL_ShowSimpleMessageBox(0, GAME_FULL_NAME, uncaught.c_str(), nullptr);
+#endif
 	}
 
 	return success ? 0 : 1;

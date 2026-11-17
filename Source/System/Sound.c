@@ -11,6 +11,8 @@
 /***************/
 
 #include "game.h"
+#include "soundogg.h"
+#include "webassets.h"
 
 
 /****************************/
@@ -84,6 +86,7 @@ Boolean						gSongPlayingFlag = false;
 Boolean						gLoopSongFlag = true;
 
 static short				gCurrentSong = -1;
+static SndListHandle		sMusicSndHandle = nil;
 
 
 		/*****************/
@@ -267,22 +270,38 @@ OSErr err;
 		return;
 	}
 
-	SDL_snprintf(path, sizeof(path), ":Audio:%s:%s.aiff", kSoundBankNames[effectDef->bank], effectDef->filename);
-
+	bool loadedOgg = false;
+	SDL_snprintf(path, sizeof(path), ":Audio:%s:%s.ogg", kSoundBankNames[effectDef->bank], effectDef->filename);
 	err = FSMakeFSSpec(gDataSpec.vRefNum, gDataSpec.parID, path, &spec);
-	if (err != noErr)
+	if (err == noErr && FSpOpenDF(&spec, fsRdPerm, &refNum) == noErr)
 	{
-		DoAlert(path);
-		return;
+		loadedSound->sndHandle = LoadOggFileAsSndResource(refNum);
+		FSClose(refNum);
+		if (loadedSound->sndHandle)
+		{
+			loadedOgg = true;
+		}
 	}
 
-	err = FSpOpenDF(&spec, fsRdPerm, &refNum);
-	GAME_ASSERT_MESSAGE(err == noErr, path);
+	if (!loadedOgg)
+	{
+		SDL_snprintf(path, sizeof(path), ":Audio:%s:%s.aiff", kSoundBankNames[effectDef->bank], effectDef->filename);
 
-	loadedSound->sndHandle = Pomme_SndLoadFileAsResource(refNum);
-	GAME_ASSERT_MESSAGE(loadedSound->sndHandle, path);
+		err = FSMakeFSSpec(gDataSpec.vRefNum, gDataSpec.parID, path, &spec);
+		if (err != noErr)
+		{
+			DoAlert(path);
+			return;
+		}
 
-	FSClose(refNum);
+		err = FSpOpenDF(&spec, fsRdPerm, &refNum);
+		GAME_ASSERT_MESSAGE(err == noErr, path);
+
+		loadedSound->sndHandle = Pomme_SndLoadFileAsResource(refNum);
+		GAME_ASSERT_MESSAGE(loadedSound->sndHandle, path);
+
+		FSClose(refNum);
+	}
 
 			/* GET OFFSET INTO IT */
 
@@ -290,7 +309,10 @@ OSErr err;
 
 			/* PRE-DECOMPRESS IT */
 
-	Pomme_DecompressSoundResource(&loadedSound->sndHandle, &loadedSound->sndOffset);
+	if (!loadedOgg)
+	{
+		Pomme_DecompressSoundResource(&loadedSound->sndHandle, &loadedSound->sndOffset);
+	}
 }
 
 /******************* DISPOSE OF A SOUND EFFECT ************************/
@@ -499,34 +521,62 @@ short	musicFileRefNum;
 	if (songNum < 0 || songNum >= MAX_SONGS)
 		DoFatalAlert("PlaySong: unknown song #");
 
-	iErr = FSMakeFSSpec(gDataSpec.vRefNum, gDataSpec.parID, songs[songNum].path, &spec);
-	GAME_ASSERT(!iErr);
-
-	iErr = FSpOpenDF(&spec, fsRdPerm, &musicFileRefNum);
-	GAME_ASSERT(!iErr);
+#ifdef __EMSCRIPTEN__
+	WebAssets_EnsureSongLoaded(songNum);
+#endif
 
 	gMusicVolumeTweak = songs[songNum].volumeTweak;
 
 	gCurrentSong = songNum;
 
+	bool playedOgg = false;
+	{
+		char oggPath[128];
+		SDL_strlcpy(oggPath, songs[songNum].path, sizeof(oggPath));
+		char* dot = SDL_strrchr(oggPath, '.');
+		if (dot)
+			SDL_strlcpy(dot, ".ogg", sizeof(oggPath) - (size_t)(dot - oggPath));
 
-				/*****************/
-				/* START PLAYING */
-				/*****************/
+		if (FSMakeFSSpec(gDataSpec.vRefNum, gDataSpec.parID, oggPath, &spec) == noErr &&
+			FSpOpenDF(&spec, fsRdPerm, &musicFileRefNum) == noErr)
+		{
+			sMusicSndHandle = LoadOggFileAsSndResource(musicFileRefNum);
+			FSClose(musicFileRefNum);
+			if (sMusicSndHandle)
+			{
+				long sndOffset = 0;
+				GetSoundHeaderOffset(sMusicSndHandle, &sndOffset);
+				SDL_memset(&mySndCmd, 0, sizeof(mySndCmd));
+				mySndCmd.cmd = bufferCmd;
+				mySndCmd.ptr = ((Ptr)*sMusicSndHandle) + sndOffset;
+				iErr = SndDoImmediate(gMusicChannel, &mySndCmd);
+				playedOgg = (iErr == noErr);
+			}
+		}
+	}
 
-			/* START PLAYING FROM FILE */
+	if (!playedOgg)
+	{
+		iErr = FSMakeFSSpec(gDataSpec.vRefNum, gDataSpec.parID, songs[songNum].path, &spec);
+		GAME_ASSERT(!iErr);
 
-	iErr = SndStartFilePlay(
-		gMusicChannel,
-		musicFileRefNum,
-		0,
-		0, //STREAM_BUFFER_SIZE
-		0, //gMusicBuffer
-		nil,
-		nil, //SongCompletionProc
-		true);
+		iErr = FSpOpenDF(&spec, fsRdPerm, &musicFileRefNum);
+		GAME_ASSERT(!iErr);
 
-	FSClose(musicFileRefNum);		// close the file (Pomme decompresses entire song into memory)
+				/* START PLAYING FROM FILE */
+
+		iErr = SndStartFilePlay(
+			gMusicChannel,
+			musicFileRefNum,
+			0,
+			0, //STREAM_BUFFER_SIZE
+			0, //gMusicBuffer
+			nil,
+			nil, //SongCompletionProc
+			true);
+
+		FSClose(musicFileRefNum);		// close the file (Pomme decompresses entire song into memory)
+	}
 
 	if (iErr)
 	{
@@ -571,6 +621,11 @@ void KillSong(void)
 	gSongPlayingFlag = false;											// tell callback to do nothing
 
 	SndStopFilePlay(gMusicChannel, true);								// stop it
+	if (sMusicSndHandle)
+	{
+		DisposeHandle((Handle)sMusicSndHandle);
+		sMusicSndHandle = nil;
+	}
 }
 
 
