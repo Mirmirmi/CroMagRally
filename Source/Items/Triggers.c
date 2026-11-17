@@ -552,8 +552,7 @@ short	playerNum;
 			/* ANNOUNCE IT */
 
 	if (gPlayerInfo[playerNum].stickyTiresTimer <= 0.0f)
-		if (gPlayerInfo[playerNum].onThisMachine && (!gPlayerInfo[playerNum].isComputer))
-			PlayAnnouncerSound(EFFECT_POW_STICKYTIRES,false, .5);
+		PlayPlayerAnnouncerSound(playerNum, EFFECT_POW_STICKYTIRES, false, .5);
 
 
 				/* SET THE TICKY TIRES */
@@ -570,7 +569,7 @@ short	playerNum;
 	if (gIsNetworkHost && theNode->TerrainItemPtr != nil && gMasterItemList && *gMasterItemList)
 	{
 		uint32_t idx = (uint32_t)(theNode->TerrainItemPtr - (*gMasterItemList));
-		Net_HostSendPOWPickup(idx, playerNum, theNode->POWType, theNode->POWHiddenTimer);
+		Net_HostSendPOWPickup(idx, playerNum, POW_TYPE_NONE, theNode->POWHiddenTimer);
 	}
 	theNode->StatusBits |= STATUS_BIT_HIDDEN;
 	theNode->CType = 0;
@@ -654,8 +653,7 @@ short	playerNum;
 			/* ANNOUNCE IT */
 
 	if (gPlayerInfo[playerNum].superSuspensionTimer <= 0.0f)
-		if (gPlayerInfo[playerNum].onThisMachine && (!gPlayerInfo[playerNum].isComputer))
-			PlayAnnouncerSound(EFFECT_POW_SUSPENSION,false, .5);
+		PlayPlayerAnnouncerSound(playerNum, EFFECT_POW_SUSPENSION, false, .5);
 
 				/* SET THE SUSPENSION */
 
@@ -671,7 +669,7 @@ short	playerNum;
 	if (gIsNetworkHost && theNode->TerrainItemPtr != nil && gMasterItemList && *gMasterItemList)
 	{
 		uint32_t idx = (uint32_t)(theNode->TerrainItemPtr - (*gMasterItemList));
-		Net_HostSendPOWPickup(idx, playerNum, theNode->POWType, theNode->POWHiddenTimer);
+		Net_HostSendPOWPickup(idx, playerNum, POW_TYPE_NONE, theNode->POWHiddenTimer);
 	}
 	theNode->StatusBits |= STATUS_BIT_HIDDEN;
 	theNode->CType = 0;
@@ -757,8 +755,7 @@ short	playerNum;
 			/* ANNOUNCE IT */
 
 	if (gPlayerInfo[playerNum].invisibilityTimer <= 0.0f)
-		if (gPlayerInfo[playerNum].onThisMachine && (!gPlayerInfo[playerNum].isComputer))
-			PlayAnnouncerSound(EFFECT_POW_INVISIBILITY,false, .5);
+		PlayPlayerAnnouncerSound(playerNum, EFFECT_POW_INVISIBILITY, false, .5);
 
 
 	gPlayerInfo[playerNum].invisibilityTimer = 15.0;				// set duration
@@ -775,7 +772,7 @@ short	playerNum;
 	if (gIsNetworkHost && theNode->TerrainItemPtr != nil && gMasterItemList && *gMasterItemList)
 	{
 		uint32_t idx = (uint32_t)(theNode->TerrainItemPtr - (*gMasterItemList));
-		Net_HostSendPOWPickup(idx, playerNum, theNode->POWType, theNode->POWHiddenTimer);
+		Net_HostSendPOWPickup(idx, playerNum, POW_TYPE_NONE, theNode->POWHiddenTimer);
 	}
 	theNode->StatusBits |= STATUS_BIT_HIDDEN;
 	theNode->CType = 0;
@@ -1056,7 +1053,7 @@ float					x,y,z;
 	}
 
 
-	PlayEffect_Parms3D(EFFECT_HITSNOW, &theNode->Coord, NORMAL_CHANNEL_RATE, 4);
+	PlayEffect_Parms3DSynced(EFFECT_HITSNOW, &theNode->Coord, NORMAL_CHANNEL_RATE, 4);
 
 }
 
@@ -1148,7 +1145,7 @@ static Boolean DoTrig_CampFire(ObjNode *theNode, ObjNode *whoNode, Byte sideBits
 
 		MakeConeBlast(theNode->Coord.x, theNode->Coord.y, theNode->Coord.z);
 
-		PlayEffect_Parms3D(EFFECT_BOOM, &theNode->Coord, NORMAL_CHANNEL_RATE, 4);
+		PlayEffect_Parms3DSynced(EFFECT_BOOM, &theNode->Coord, NORMAL_CHANNEL_RATE, 4);
 
 
 				/* DELETE THE FIRE */
@@ -1441,13 +1438,10 @@ short	teamNum;
 		if (gIsNetworkHost)
 			Net_HostSendFlagEvent(0, whoNode->PlayerNum);
 
-		if (gPlayerInfo[whoNode->PlayerNum].onThisMachine)
-		{
-			if (gPlayerInfo[whoNode->PlayerNum].team == teamNum)
-				PlayAnnouncerSound(EFFECT_GOODJOB, false, 0);
-			else
-				PlayAnnouncerSound(EFFECT_COSTYA, false, 0);
-		}
+		if (gPlayerInfo[whoNode->PlayerNum].team == teamNum)
+			PlayPlayerAnnouncerSound(whoNode->PlayerNum, EFFECT_GOODJOB, false, 0);
+		else
+			PlayPlayerAnnouncerSound(whoNode->PlayerNum, EFFECT_COSTYA, false, 0);
 	}
 
 
@@ -1535,7 +1529,7 @@ static Boolean DoTrig_Vase(ObjNode *theNode, ObjNode *whoNode, Byte sideBits)
 		gDelta.x *= .2f;					// slow
 		gDelta.z *= .2f;
 
-		PlayEffect_Parms3D(EFFECT_SHATTER, &theNode->Coord, NORMAL_CHANNEL_RATE, 3);
+		PlayEffect_Parms3DSynced(EFFECT_SHATTER, &theNode->Coord, NORMAL_CHANNEL_RATE, 3);
 
 		return(false);
 	}
@@ -1856,7 +1850,7 @@ static Boolean DoTrig_Gong(ObjNode *theNode, ObjNode *whoNode, Byte sideBits)
 		gPlayerInfo[p].superSuspensionTimer *= 2.0f;			// double suspension timer
 
 
-		PlayEffect_Parms3D(EFFECT_GONG, &theNode->Coord, NORMAL_CHANNEL_RATE, 3.0);
+		PlayEffect_Parms3DSynced(EFFECT_GONG, &theNode->Coord, NORMAL_CHANNEL_RATE, 3.0);
 
 		return(false);
 	}
@@ -1992,7 +1986,7 @@ NewParticleDefType		newParticleDef;
 	}
 
 
-	PlayEffect_Parms3D(EFFECT_BOOM, &pt, NORMAL_CHANNEL_RATE, 4);
+	PlayEffect_Parms3DSynced(EFFECT_BOOM, &pt, NORMAL_CHANNEL_RATE, 4);
 	BlastCars(-1, x, y, z, 900);
 	DeleteObject(theNode);
 
@@ -2058,7 +2052,7 @@ short	p;
 
 	if ((int)gPlayerInfo[p].stickyTiresTimer < 19)		// only if not recently
 	{
-		PlayEffect_Parms3D(EFFECT_CHANT, &theNode->Coord, NORMAL_CHANNEL_RATE-0x5000, 2.0);
+		PlayEffect_Parms3DSynced(EFFECT_CHANT, &theNode->Coord, NORMAL_CHANNEL_RATE-0x5000, 2.0);
 	}
 
 			/* DOUBLE STUFF */

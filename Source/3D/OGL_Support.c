@@ -856,11 +856,24 @@ int	t,b,l,r;
 
 #pragma mark -
 
+static inline uint8_t OGL_ClampGammaByte(float component)
+{
+	/* Reject NaN/negative/overshooting inputs (e.g. unclamped color filters) before indexing gGammaRampF[256] */
+	if (!(component > 0.0f))
+		return 0;
+	if (component >= 1.0f)
+		return 255;
+	int idx = (int)(component * 255.0f);
+	if (idx > 255)
+		idx = 255;
+	return (uint8_t)idx;
+}
+
 void OGL_FixColorGamma(OGLColorRGBA* color)
 {
-	color->r = gGammaRampF[(uint8_t)(color->r * 255.0f)];
-	color->g = gGammaRampF[(uint8_t)(color->g * 255.0f)];
-	color->b = gGammaRampF[(uint8_t)(color->b * 255.0f)];
+	color->r = gGammaRampF[OGL_ClampGammaByte(color->r)];
+	color->g = gGammaRampF[OGL_ClampGammaByte(color->g)];
+	color->b = gGammaRampF[OGL_ClampGammaByte(color->b)];
 }
 
 static void OGL_FixTextureGamma(uint8_t* imageMemory, int width, int height, GLint srcFormat, GLint dataType)

@@ -33,25 +33,15 @@
 /*     CONSTANTS      */
 /**********************/
 
-enum
-{
-	kPlayerSnapFlag_IsIt         = 1 << 0,
-	kPlayerSnapFlag_Eliminated   = 1 << 1,
-	kPlayerSnapFlag_RaceComplete = 1 << 2,
-	kPlayerSnapFlag_IsComputer   = 1 << 3,
-	kPlayerSnapFlag_OnWater      = 1 << 4,
-	kPlayerSnapFlag_IsPlaning    = 1 << 5,
-	kPlayerSnapFlag_GasDown      = 1 << 6,
-	kPlayerSnapFlag_Braking      = 1 << 7,
-	kPlayerSnapFlag_WrongWay     = 1 << 8,
-	kPlayerSnapFlag_MakingSkid   = 1 << 9,
-	kPlayerSnapFlag_SubMarine    = 1 << 10
-};
-
 #define DISCOVERY_PRUNE_MS       3500u
 #define DISCOVERY_INTERVAL_MS    450u
-#define SNAPSHOT_INTERVAL_MS     16u    /* ~60 Hz max snapshot rate */
-#define INPUT_SEND_INTERVAL_MS   16u    /* ~60 Hz input send rate */
+#define SNAPSHOT_INTERVAL_MS     13u    /* ~75 Hz max snapshot rate (avoids 60Hz aliasing) */
+#define INPUT_SEND_INTERVAL_MS   13u    /* ~75 Hz input send rate */
+
+#define NET_PROJ_SYNC_STATUS_MASK \
+	(STATUS_BIT_AIMATCAMERA | STATUS_BIT_KEEPBACKFACES | STATUS_BIT_GLOW | \
+	 STATUS_BIT_NOLIGHTING | STATUS_BIT_ROTXZY | STATUS_BIT_NOTEXTUREWRAP | \
+	 STATUS_BIT_NOZWRITES | STATUS_BIT_HIDDEN)
 
 #ifndef _WIN32
 	typedef int NetUDPSocket;
@@ -134,6 +124,9 @@ static NetWeaponTracker sHostWeapons[NET_MAX_PROJECTILES];
 static uint32_t         sNextWeaponNetId = 1;
 static NetWeaponTracker sClientWeapons[NET_MAX_PROJECTILES];
 static Boolean          sMatchLost = false;
+static uint32_t         sLastSnapRecvMs = 0;
+static Boolean          sClientAnnouncedPOW[MAX_POW_TYPES];
+static uint8_t          sClientPrevThrowMask[MAX_PLAYERS];
 
 /**********************/
 /*  INTERNAL HELPERS  */
@@ -633,21 +626,50 @@ static void HandleReliableEventOnClient(const NetReliableEventMsg* ev)
 			if (ev->a >= 0 && ev->a < MAX_PLAYERS && gPlayerInfo[ev->a].onThisMachine)
 			{
 				PlayEffect(EFFECT_GETPOW);
+				if (ev->b >= 0 && ev->b < MAX_POW_TYPES &&
+				    !gPlayerInfo[ev->a].isComputer && !sClientAnnouncedPOW[ev->b])
+				{
+					PlayAnnouncerSound(EFFECT_POW_BONEBOMB + ev->b, false, 0.4f);
+					sClientAnnouncedPOW[ev->b] = true;
+				}
 			}
 			break;
 		}
 
 		case kNetEvent_Explosion:
 		{
-			OGLVector3D zero = {0.0f, 0.0f, 0.0f};
-			MakeBombExplosion(NULL, ev->f0, ev->f2, &zero);
+			OGLPoint3D pt = { ev->f0, ev->f1, ev->f2 };
+			if (ev->c == kNetExplosion_Bomb)
+			{
+				OGLVector3D zero = {0.0f, 0.0f, 0.0f};
+				MakeBombExplosion(NULL, ev->f0, ev->f2, &zero);
+			}
+			else if (ev->c == kNetExplosion_Snow)
+			{
+				MakeSnowExplosion(&pt);
+			}
+			else
+			{
+				PlayWeaponExplosionFX(ev->c, &pt);
+			}
 			break;
 		}
 
 		case kNetEvent_Sound3D:
 		{
 			OGLPoint3D pt = { ev->f0, ev->f1, ev->f2 };
-			PlayEffect_Parms3D(ev->c, &pt, NORMAL_CHANNEL_RATE, ev->f3);
+			uint32_t rate = (ev->paramU32 != 0) ? ev->paramU32 : NORMAL_CHANNEL_RATE;
+			PlayEffect_Parms3D(ev->c, &pt, rate, ev->f3);
+			break;
+		}
+
+		case kNetEvent_AnnouncerSound:
+		{
+			if (ev->a < 0 ||
+			    (ev->a < MAX_PLAYERS && gPlayerInfo[ev->a].onThisMachine && !gPlayerInfo[ev->a].isComputer))
+			{
+				PlayAnnouncerSound(ev->c, ev->b != 0, ev->f0);
+			}
 			break;
 		}
 
@@ -840,6 +862,7 @@ static void ApplySnapshotToClientWorld(const NetHostSnapshotMsg* snap)
 		pi->flamingTimer = ps->flamingTimer;
 		pi->submarineImmobilized = ps->submarineImmobilized;
 		pi->health = (float)ps->health / 100.0f;
+		int prevLap = pi->lapNum;
 		pi->powType = ps->powType;
 		pi->powQuantity = ps->powQuantity;
 		pi->lapNum = ps->lapNum;
@@ -855,11 +878,35 @@ static void ApplySnapshotToClientWorld(const NetHostSnapshotMsg* snap)
 		pi->gasPedalDown = (ps->flags & kPlayerSnapFlag_GasDown) != 0;
 		pi->braking      = (ps->flags & kPlayerSnapFlag_Braking) != 0;
 		pi->wrongWay     = (ps->flags & kPlayerSnapFlag_WrongWay) != 0;
-		pi->makingSkid   = (ps->flags & kPlayerSnapFlag_MakingSkid) != 0;
+		/* Leave pi->makingSkid under local UpdateTireSkidMarks control so EFFECT_SKID triggers on new skids */
+
+		if (gIsInGame && !pi->raceComplete && pi->onThisMachine && !pi->isComputer &&
+		    prevLap >= 0 && ps->lapNum > prevLap && ps->lapNum > 0 && ps->lapNum < gNumLapsThisRace)
+		{
+			ShowLapNum((short)i);
+		}
+
+		uint8_t throwMask = (uint8_t)((ps->flags & (kPlayerSnapFlag_ThrowFwd | kPlayerSnapFlag_ThrowBack)) >> 12);
+		if (pi->headObj && pi->headObj->Skeleton)
+		{
+			if (throwMask != 0 && throwMask != sClientPrevThrowMask[i])
+			{
+				short throwAnim = (ps->flags & kPlayerSnapFlag_ThrowFwd)
+					? PLAYER_ANIM_THROWFORWARD : PLAYER_ANIM_THROWBACKWARD;
+				pi->headObj->HEAD_THROW_READY_FLAG = false;
+				MorphToSkeletonAnim(pi->headObj->Skeleton, throwAnim, 8.0f);
+			}
+			sClientPrevThrowMask[i] = throwMask;
+		}
 
 		ObjNode* car = pi->objNode;
 		if (car)
 		{
+			if (ps->flags & kPlayerSnapFlag_OnGround)
+				car->StatusBits |= STATUS_BIT_ONGROUND;
+			else
+				car->StatusBits &= ~STATUS_BIT_ONGROUND;
+
 			car->Delta.x = ps->vx;
 			car->Delta.y = ps->vy;
 			car->Delta.z = ps->vz;
@@ -945,7 +992,7 @@ static void ApplySnapshotToClientWorld(const NetHostSnapshotMsg* snap)
 				def.coord.x = pr->x;
 				def.coord.y = pr->y;
 				def.coord.z = pr->z;
-				def.flags = STATUS_BIT_KEEPBACKFACES | STATUS_BIT_NOLIGHTING | STATUS_BIT_NOTEXTUREWRAP;
+				def.flags = pr->statusBits & NET_PROJ_SYNC_STATUS_MASK;
 				def.slot = PARTICLE_SLOT;
 				def.moveCall = NULL;
 				def.scale = pr->scale > 0.0f ? pr->scale : 1.0f;
@@ -965,6 +1012,7 @@ static void ApplySnapshotToClientWorld(const NetHostSnapshotMsg* snap)
 				}
 				if (vis)
 				{
+					vis->StatusBits = (vis->StatusBits & ~NET_PROJ_SYNC_STATUS_MASK) | (pr->statusBits & NET_PROJ_SYNC_STATUS_MASK);
 					vis->Rot.x = pr->rotX;
 					vis->Rot.y = pr->rotY;
 					vis->Rot.z = pr->rotZ;
@@ -982,6 +1030,13 @@ static void ApplySnapshotToClientWorld(const NetHostSnapshotMsg* snap)
 			ObjNode* vis = sClientWeapons[foundIdx].obj;
 			if (vis)
 			{
+				vis->StatusBits = (vis->StatusBits & ~NET_PROJ_SYNC_STATUS_MASK) | (pr->statusBits & NET_PROJ_SYNC_STATUS_MASK);
+				if (pr->scale > 0.0f)
+				{
+					vis->Scale.x = pr->scale;
+					vis->Scale.y = pr->scale;
+					vis->Scale.z = pr->scale;
+				}
 				vis->Coord.x = pr->x;
 				vis->Coord.y = pr->y;
 				vis->Coord.z = pr->z;
@@ -1185,14 +1240,41 @@ static void HandlePacketOnClient(const uint8_t* data, size_t len)
 			break;
 
 		case kNetMsgHostSnapshot:
-			if (sClientMatchStarted && len >= sizeof(NetHostSnapshotMsg))
+			if (sClientMatchStarted && len >= offsetof(NetHostSnapshotMsg, players))
 			{
-				const NetHostSnapshotMsg* snap = (const NetHostSnapshotMsg*)data;
-				if (!sHasSnapshot || (int32_t)(snap->seq - sLastRecvSnapSeq) > 0)
+				NetHostSnapshotMsg unpacked;
+				memset(&unpacked, 0, sizeof(unpacked));
+				memcpy(&unpacked, data, offsetof(NetHostSnapshotMsg, players));
+
+				size_t pCount = (unpacked.numPlayers <= MAX_PLAYERS) ? unpacked.numPlayers : MAX_PLAYERS;
+				size_t tCount = (unpacked.numTorches <= NET_MAX_TORCHES) ? unpacked.numTorches : NET_MAX_TORCHES;
+				size_t wCount = (unpacked.numProjectiles <= NET_MAX_PROJECTILES) ? unpacked.numProjectiles : NET_MAX_PROJECTILES;
+				size_t needLen = offsetof(NetHostSnapshotMsg, players)
+					+ (size_t)unpacked.numPlayers * sizeof(NetPlayerSnapshot)
+					+ (size_t)unpacked.numTorches * sizeof(NetTorchSnapshot)
+					+ (size_t)unpacked.numProjectiles * sizeof(NetProjectileSnapshot);
+
+				if (len >= needLen &&
+				    (!sHasSnapshot || (int32_t)(unpacked.seq - sLastRecvSnapSeq) > 0))
 				{
-					sLastRecvSnapSeq = snap->seq;
-					sCurrSnap = *snap;
+					const uint8_t* ptr = data + offsetof(NetHostSnapshotMsg, players);
+					if (pCount > 0)
+						memcpy(unpacked.players, ptr, pCount * sizeof(NetPlayerSnapshot));
+					ptr += (size_t)unpacked.numPlayers * sizeof(NetPlayerSnapshot);
+					if (tCount > 0)
+						memcpy(unpacked.torches, ptr, tCount * sizeof(NetTorchSnapshot));
+					ptr += (size_t)unpacked.numTorches * sizeof(NetTorchSnapshot);
+					if (wCount > 0)
+						memcpy(unpacked.projectiles, ptr, wCount * sizeof(NetProjectileSnapshot));
+
+					unpacked.numPlayers = (uint8_t)pCount;
+					unpacked.numTorches = (uint8_t)tCount;
+					unpacked.numProjectiles = (uint8_t)wCount;
+
+					sLastRecvSnapSeq = unpacked.seq;
+					sCurrSnap = unpacked;
 					sHasSnapshot = true;
+					sLastSnapRecvMs = NetNowMs();
 					ApplySnapshotToClientWorld(&sCurrSnap);
 				}
 			}
@@ -1307,6 +1389,9 @@ void Net_ResetGameSyncState(void)
 	sNextWeaponNetId = 1;
 	memset(sClientWeapons, 0, sizeof(sClientWeapons));
 	sMatchLost = false;
+	sLastSnapRecvMs = 0;
+	memset(sClientAnnouncedPOW, 0, sizeof(sClientAnnouncedPOW));
+	memset(sClientPrevThrowMask, 0, sizeof(sClientPrevThrowMask));
 }
 
 void ShutdownNetworkManager(void)
@@ -1740,6 +1825,7 @@ Boolean Net_ConnectToHost(const char* ipString, uint16_t port, const char* playe
 		SafeCopyStr(sStatusText, sizeof(sStatusText), "CONNECT FAILED");
 		return false;
 	}
+	enet_peer_timeout(sServerPeer, 32, 15000, 45000);
 
 	SafeCopyStr(sPendingClientName, sizeof(sPendingClientName),
 	            (playerName && playerName[0]) ? playerName : "PLAYER");
@@ -1774,6 +1860,10 @@ void Net_PollLobby(void)
 					if (!Net_IsLANAddress(ip))
 					{
 						enet_peer_disconnect_now(event.peer, 0);
+					}
+					else
+					{
+						enet_peer_timeout(event.peer, 32, 15000, 45000);
 					}
 					/* Client will send kNetMsgJoinRequest */
 				}
@@ -1905,6 +1995,28 @@ void PlayerBroadcastVehicleType(void)
 	}
 }
 
+int Net_CheckVehicleSelectionsReady(void)
+{
+	if (!gNetGameInProgress)
+		return 1;
+
+	Net_PollLobby();
+
+	if (gIsNetworkClient && (sConnState == kNetConn_Disconnected || sConnState == kNetConn_Failed || sMatchLost))
+		return -1;
+
+	for (int i = 0; i < MAX_PLAYERS; i++)
+	{
+		if (sLobbyState.players[i].active && !sLobbyState.players[i].vehicleSelected)
+			return 0;
+	}
+
+	ApplyLobbyStateToGlobals();
+	if (sPendingSeed != 0)
+		SetMyRandomSeed(sPendingSeed);
+	return 1;
+}
+
 Boolean GetVehicleSelectionFromNetPlayers(void)
 {
 	if (!gNetGameInProgress)
@@ -1913,9 +2025,11 @@ Boolean GetVehicleSelectionFromNetPlayers(void)
 	while (true)
 	{
 		DoSDLMaintenance();
-		Net_PollLobby();
 
-		if (gIsNetworkClient && (sConnState == kNetConn_Disconnected || sConnState == kNetConn_Failed || sMatchLost))
+		int ready = Net_CheckVehicleSelectionsReady();
+		if (ready > 0)
+			return false;
+		if (ready < 0)
 			return true;
 
 		/* Allow backing out while waiting for slow peers */
@@ -1925,26 +2039,8 @@ Boolean GetVehicleSelectionFromNetPlayers(void)
 			return true;
 		}
 
-		Boolean allReady = true;
-		for (int i = 0; i < MAX_PLAYERS; i++)
-		{
-			if (sLobbyState.players[i].active && !sLobbyState.players[i].vehicleSelected)
-			{
-				allReady = false;
-				break;
-			}
-		}
-
-		if (allReady)
-			break;
-
 		SDL_Delay(10);
 	}
-
-	ApplyLobbyStateToGlobals();
-	if (sPendingSeed != 0)
-		SetMyRandomSeed(sPendingSeed);
-	return false;
 }
 
 /**********************/
@@ -2184,6 +2280,15 @@ void HostSend_ControlInfoToClients(void)
 		if (pi->braking)      flags |= kPlayerSnapFlag_Braking;
 		if (pi->wrongWay)     flags |= kPlayerSnapFlag_WrongWay;
 		if (pi->makingSkid)   flags |= kPlayerSnapFlag_MakingSkid;
+		if (car && (car->StatusBits & STATUS_BIT_ONGROUND))
+			flags |= kPlayerSnapFlag_OnGround;
+		if (pi->headObj && pi->headObj->Skeleton)
+		{
+			if (pi->headObj->Skeleton->AnimNum == PLAYER_ANIM_THROWFORWARD)
+				flags |= kPlayerSnapFlag_ThrowFwd;
+			else if (pi->headObj->Skeleton->AnimNum == PLAYER_ANIM_THROWBACKWARD)
+				flags |= kPlayerSnapFlag_ThrowBack;
+		}
 		ps->flags = flags;
 	}
 
@@ -2209,6 +2314,7 @@ void HostSend_ControlInfoToClients(void)
 			const ObjNode* obj = sHostWeapons[w].obj;
 			NetProjectileSnapshot* pr = &snap.projectiles[projCount++];
 			pr->netId = sHostWeapons[w].netId;
+			pr->statusBits = obj->StatusBits & NET_PROJ_SYNC_STATUS_MASK;
 			pr->group = obj->Group;
 			pr->type = obj->Type;
 			pr->kind = sHostWeapons[w].kind;
@@ -2223,7 +2329,21 @@ void HostSend_ControlInfoToClients(void)
 	}
 	snap.numProjectiles = (uint8_t)projCount;
 
-	BroadcastENetPacketToClients(NET_CHANNEL_UNRELIABLE, &snap, sizeof(snap), 0, -1);
+	uint8_t wireBuf[sizeof(NetHostSnapshotMsg)];
+	size_t hdrLen = offsetof(NetHostSnapshotMsg, players);
+	size_t pBytes = (size_t)snap.numPlayers * sizeof(NetPlayerSnapshot);
+	size_t tBytes = (size_t)snap.numTorches * sizeof(NetTorchSnapshot);
+	size_t wBytes = (size_t)snap.numProjectiles * sizeof(NetProjectileSnapshot);
+	size_t totalBytes = hdrLen + pBytes + tBytes + wBytes;
+
+	uint8_t* dst = wireBuf;
+	memcpy(dst, &snap, hdrLen);
+	dst += hdrLen;
+	if (pBytes > 0) { memcpy(dst, snap.players, pBytes); dst += pBytes; }
+	if (tBytes > 0) { memcpy(dst, snap.torches, tBytes); dst += tBytes; }
+	if (wBytes > 0) { memcpy(dst, snap.projectiles, wBytes); }
+
+	BroadcastENetPacketToClients(NET_CHANNEL_UNRELIABLE, wireBuf, totalBytes, ENET_PACKET_FLAG_UNRELIABLE_FRAGMENT, -1);
 	enet_host_flush(sHost);
 }
 
@@ -2241,9 +2361,13 @@ void Net_ClientUpdateVisualFrame(void)
 		return;
 
 	float fps = gFramesPerSecondFrac;
-	float lerpAlpha = 1.0f - expf(-22.0f * (fps > 0.0f ? fps : 0.016f));
+	float lerpAlpha = 1.0f - expf(-25.0f * (fps > 0.0f ? fps : 0.016f));
 	if (lerpAlpha < 0.0f) lerpAlpha = 0.0f;
 	if (lerpAlpha > 1.0f) lerpAlpha = 1.0f;
+
+	float snapAge = (sLastSnapRecvMs != 0) ? ((float)(NetNowMs() - sLastSnapRecvMs) * 0.001f) : 0.0f;
+	if (snapAge < 0.0f) snapAge = 0.0f;
+	if (snapAge > 0.045f) snapAge = 0.045f;
 
 	int count = (sCurrSnap.numPlayers <= MAX_PLAYERS) ? sCurrSnap.numPlayers : MAX_PLAYERS;
 	for (int i = 0; i < count; i++)
@@ -2253,10 +2377,15 @@ void Net_ClientUpdateVisualFrame(void)
 			continue;
 
 		const NetPlayerSnapshot* ps = &sCurrSnap.players[i];
+		float targetX = ps->x + ps->vx * snapAge;
+		float targetY = ps->y + ps->vy * snapAge;
+		float targetZ = ps->z + ps->vz * snapAge;
+
 		car->OldCoord = car->Coord;
-		car->Coord.x += (ps->x - car->Coord.x) * lerpAlpha;
-		car->Coord.y += (ps->y - car->Coord.y) * lerpAlpha;
-		car->Coord.z += (ps->z - car->Coord.z) * lerpAlpha;
+		car->Coord.x += (targetX - car->Coord.x) * lerpAlpha;
+		car->Coord.y += (targetY - car->Coord.y) * lerpAlpha;
+		car->Coord.z += (targetZ - car->Coord.z) * lerpAlpha;
+		gPlayerInfo[i].coord = car->Coord;
 
 		/* Wrap-safe Y rotation blend */
 		float dRotY = ps->rotY - car->Rot.y;
@@ -2270,6 +2399,14 @@ void Net_ClientUpdateVisualFrame(void)
 		UpdateCarVisualsFromSnapshot(car);
 		if (gTrackNum == TRACK_NUM_ATLANTIS)
 			AlignPropellerOnSubmarine(car);
+	}
+
+	for (int s = 0; s < NET_MAX_PROJECTILES; s++)
+	{
+		if (sClientWeapons[s].active && sClientWeapons[s].obj && !IsObjectBeingDeleted(sClientWeapons[s].obj))
+		{
+			UpdateClientProjectileTrail(sClientWeapons[s].obj);
+		}
 	}
 }
 
@@ -2309,7 +2446,7 @@ void Net_HostSendExplosion(float x, float y, float z, short typeHint)
 	BroadcastENetPacketToClients(NET_CHANNEL_RELIABLE, &ev, sizeof(ev), ENET_PACKET_FLAG_RELIABLE, -1);
 }
 
-void Net_HostSendSound3D(short effectId, float x, float y, float z, float volume)
+void Net_HostSendSound3D(short effectId, float x, float y, float z, uint32_t rateMultiplier, float volume)
 {
 	if (!gIsNetworkHost || !sHost)
 		return;
@@ -2319,10 +2456,27 @@ void Net_HostSendSound3D(short effectId, float x, float y, float z, float volume
 	ev.msgType = kNetMsgReliableEvent;
 	ev.kind = kNetEvent_Sound3D;
 	ev.c = effectId;
+	ev.paramU32 = rateMultiplier;
 	ev.f0 = x;
 	ev.f1 = y;
 	ev.f2 = z;
 	ev.f3 = volume;
+	BroadcastENetPacketToClients(NET_CHANNEL_RELIABLE, &ev, sizeof(ev), ENET_PACKET_FLAG_RELIABLE, -1);
+}
+
+void Net_HostSendAnnouncerSound(short targetPlayer, short effectId, Boolean override, float delay)
+{
+	if (!gIsNetworkHost || !sHost)
+		return;
+
+	NetReliableEventMsg ev;
+	memset(&ev, 0, sizeof(ev));
+	ev.msgType = kNetMsgReliableEvent;
+	ev.kind = kNetEvent_AnnouncerSound;
+	ev.a = (int8_t)targetPlayer;
+	ev.b = override ? 1 : 0;
+	ev.c = effectId;
+	ev.f0 = delay;
 	BroadcastENetPacketToClients(NET_CHANNEL_RELIABLE, &ev, sizeof(ev), ENET_PACKET_FLAG_RELIABLE, -1);
 }
 
@@ -2391,22 +2545,60 @@ void Net_HostSendElimination(short eliminatedPlayer)
 /* PROJECTILE TRACKING*/
 /**********************/
 
+static Boolean Net_IsStaticGroundHazard(const ObjNode* obj)
+{
+	return obj && obj->Group == MODEL_GROUP_WEAPONS &&
+		(obj->Type == WEAPONS_ObjType_OilPatch || obj->Type == WEAPONS_ObjType_LandMine);
+}
+
 void Net_RegisterWeaponObj(struct ObjNode* obj, uint8_t kind)
 {
 	if (!gIsNetworkHost || !obj)
 		return;
 
+	int freeIdx = -1;
+	int oldestHazardIdx = -1;
+	int oldestAnyIdx = -1;
+
 	for (int i = 0; i < NET_MAX_PROJECTILES; i++)
 	{
-		if (!sHostWeapons[i].active)
+		if (sHostWeapons[i].active)
 		{
-			sHostWeapons[i].active = true;
-			sHostWeapons[i].netId = sNextWeaponNetId++;
-			sHostWeapons[i].kind = kind;
-			sHostWeapons[i].obj = obj;
-			return;
+			if (!sHostWeapons[i].obj || IsObjectBeingDeleted(sHostWeapons[i].obj))
+			{
+				memset(&sHostWeapons[i], 0, sizeof(sHostWeapons[i]));
+				if (freeIdx < 0)
+					freeIdx = i;
+				continue;
+			}
+			if (sHostWeapons[i].obj == obj)
+				return;
+
+			if (Net_IsStaticGroundHazard(sHostWeapons[i].obj))
+			{
+				if (oldestHazardIdx < 0 || sHostWeapons[i].netId < sHostWeapons[oldestHazardIdx].netId)
+					oldestHazardIdx = i;
+			}
+			if (oldestAnyIdx < 0 || sHostWeapons[i].netId < sHostWeapons[oldestAnyIdx].netId)
+				oldestAnyIdx = i;
+		}
+		else if (freeIdx < 0)
+		{
+			freeIdx = i;
 		}
 	}
+
+	/* Evict oldest static ground hazard (or oldest entry) so newly fired items never drop mid-match */
+	int slot = freeIdx;
+	if (slot < 0)
+		slot = (oldestHazardIdx >= 0) ? oldestHazardIdx : oldestAnyIdx;
+	if (slot < 0)
+		return;
+
+	sHostWeapons[slot].active = true;
+	sHostWeapons[slot].netId = sNextWeaponNetId++;
+	sHostWeapons[slot].kind = kind;
+	sHostWeapons[slot].obj = obj;
 }
 
 void Net_UnregisterWeaponObj(struct ObjNode* obj)

@@ -10,6 +10,7 @@
 /****************************/
 
 #include "game.h"
+#include "network.h"
 
 /****************************/
 /*    PROTOTYPES            */
@@ -585,6 +586,39 @@ static void MovePlayer_Car_Multipass(ObjNode *theNode)
 
 
 
+/******************** UPDATE CAR HEAD ANIMATION ********************/
+
+static void UpdateCarHeadAnim(ObjNode *theNode, const PlayerInfoType *pinfo)
+{
+	ObjNode *head = pinfo->headObj;
+	if (!head || !head->Skeleton)
+		return;
+
+	if ((head->Skeleton->AnimNum != PLAYER_ANIM_THROWFORWARD) &&
+	    (head->Skeleton->AnimNum != PLAYER_ANIM_THROWBACKWARD))		// dont interrupt a throw for fluff anims
+	{
+		short desiredAnim = PLAYER_ANIM_SIT;						// assume the default
+
+		if ((pinfo->isPlaning) && (!pinfo->onWater))
+			desiredAnim = PLAYER_ANIM_FREAKOUT;
+		else if ((pinfo->distToFloor > 250.0f) && (!pinfo->onWater))	// see if high off ground
+			desiredAnim = PLAYER_ANIM_HANGTIME;
+		else															// close or on ground
+		{
+			if (pinfo->steering < -.1f)
+				desiredAnim = PLAYER_ANIM_LEFTTURN;
+			else if (pinfo->steering > .1f)
+				desiredAnim = PLAYER_ANIM_RIGHTTURN;
+		}
+
+		if (head->Skeleton->AnimNum != desiredAnim)
+		{
+			MorphToSkeletonAnim(head->Skeleton, desiredAnim, 4.0);
+		}
+	}
+}
+
+
 /******************** DO CAR MOTION ********************/
 
 static void DoCarMotion(ObjNode *theNode)
@@ -595,8 +629,6 @@ float		fps = gFramesPerSecondFrac;
 OGLVector2D	aimVector,skidVector;
 float		carBottomY, oldDeltaY;
 short		playerNum;
-ObjNode		*head;
-short		desiredAnim;
 CarStatsType	*info;
 uint16_t		tileAttribs;
 float		thrust,dx,dz;
@@ -674,9 +706,9 @@ Boolean		onWater;
 	{
 		if (pinfo->distToFloor > 500.0f)							// must be high for it to register
 		{
-			if (pinfo->onThisMachine && (!pinfo->isComputer) && (!onWater))		// only humans on this computer make sound
+			if (!onWater)
 			{
-				PlayAnnouncerSound(EFFECT_WOAH, false, 0);
+				PlayPlayerAnnouncerSound(playerNum, EFFECT_WOAH, false, 0);
 			}
 		}
 	}
@@ -939,35 +971,7 @@ Boolean		onWater;
 		/* SET APPROPRIATE ANIM */
 		/************************/
 
-
-	head = pinfo->headObj;							// get ObjNode of skeleton
-
-	if ((head->Skeleton->AnimNum != PLAYER_ANIM_THROWFORWARD) && (head->Skeleton->AnimNum != PLAYER_ANIM_THROWBACKWARD))		// dont interrupt a throw for fluff anims
-	{
-		desiredAnim = PLAYER_ANIM_SIT;								// assume the default
-
-
-		if ((pinfo->isPlaning) && (!pinfo->onWater))
-			desiredAnim = PLAYER_ANIM_FREAKOUT;
-		else
-		if ((pinfo->distToFloor > 250.0f) && (!pinfo->onWater))		// see if high off ground
-		{
-			desiredAnim = PLAYER_ANIM_HANGTIME;
-		}
-		else														// close or on ground
-		{
-			if (pinfo->steering < -.1f)
-				desiredAnim = PLAYER_ANIM_LEFTTURN;
-			else
-			if (pinfo->steering > .1f)
-				desiredAnim = PLAYER_ANIM_RIGHTTURN;
-		}
-
-		if (head->Skeleton->AnimNum != desiredAnim)
-		{
-			MorphToSkeletonAnim(head->Skeleton, desiredAnim, 4.0);
-		}
-	}
+	UpdateCarHeadAnim(theNode, pinfo);
 }
 
 
@@ -1351,10 +1355,14 @@ void UpdateCarVisualsFromSnapshot(ObjNode *theNode)
 	short p = theNode->PlayerNum;
 	float fps = gFramesPerSecondFrac;
 
+	TickLapTimes(p);
 	GetObjectInfo(theNode);
 	UpdateObject(theNode);
 	gPlayerInfo[p].coord = theNode->Coord;
 	theNode->Speed3D = CalcVectorLength(&theNode->Delta);
+	gPlayerInfo[p].distToFloor = (theNode->StatusBits & STATUS_BIT_ONGROUND)
+		? 0.0f
+		: (theNode->Coord.y - GetTerrainY(theNode->Coord.x, theNode->Coord.z));
 
 	/* Keep visual ice tint synchronized when frozen */
 	if (gPlayerInfo[p].frozenTimer > 0.0f)
@@ -1375,6 +1383,9 @@ void UpdateCarVisualsFromSnapshot(ObjNode *theNode)
 	UpdateInvisibility(p);
 	UpdateFrozenTimer(p);
 	UpdateFlaming(p);
+	gPlayerInfo[p].bumpSoundTimer -= fps;
+
+	UpdateCarHeadAnim(theNode, &gPlayerInfo[p]);
 
 	if (gPlayerInfo[p].wheelObj[0] != nil)
 	{
@@ -1398,7 +1409,7 @@ void UpdateCarVisualsFromSnapshot(ObjNode *theNode)
 			gPlayerInfo[p].currentRPM = 0.0f;
 	}
 
-	if (gPlayerInfo[p].isEliminated)
+	if (gPlayerInfo[p].isEliminated || gTrackNum == TRACK_NUM_ATLANTIS)
 	{
 		if (gPlayerInfo[p].engineChannel != -1)
 			StopAChannel(&gPlayerInfo[p].engineChannel);
@@ -1906,7 +1917,7 @@ Boolean		wasInWater;
 
 				if (gPlayerInfo[playerNum].bumpSoundTimer <= 0.0f)
 				{
-					PlayEffect_Parms3D(EFFECT_CRASH2, &gCoord, NORMAL_CHANNEL_RATE, volume);
+					PlayEffect_Parms3DSynced(EFFECT_CRASH2, &gCoord, NORMAL_CHANNEL_RATE, volume);
 					gPlayerInfo[playerNum].bumpSoundTimer = .5f;
 				}
 			}
@@ -1966,15 +1977,13 @@ short		p2 = car2->PlayerNum;
 
 					if (gPlayerInfo[p1].isIt)
 					{
-						if ((p2 != gWhoWasIt) || (gReTagTimer <= 0.0f))			// see if P2 was "it" last time and we have not timed out, then dont tag
+						if (gReTagTimer <= 0.0f)								// protect newly tagged player from immediate re-tag by any player
 						{
 							gWhoWasIt = p1;
 							gWhoIsIt = p2;
 							gPlayerInfo[p1].isIt = false;
 							gPlayerInfo[p2].isIt = true;
 							gReTagTimer = TAG_SPAZ_TIMER;
-
-
 						}
 					}
 
@@ -1982,14 +1991,13 @@ short		p2 = car2->PlayerNum;
 					else
 					if (gPlayerInfo[p2].isIt)
 					{
-						if ((p1 != gWhoWasIt) || (gReTagTimer <= 0.0f))			// see if P1 was "it" last time and we have not timed out, then dont tag
+						if (gReTagTimer <= 0.0f)								// protect newly tagged player from immediate re-tag by any player
 						{
 							gWhoWasIt = p2;
 							gWhoIsIt = p1;
 							gPlayerInfo[p1].isIt = true;
 							gPlayerInfo[p2].isIt = false;
 							gReTagTimer = TAG_SPAZ_TIMER;
-
 						}
 					}
 				}
@@ -2183,29 +2191,19 @@ short		p2 = car2->PlayerNum;
 			{
 				if ((gGameMode != GAME_MODE_TAG1) && (gGameMode != GAME_MODE_TAG2))		// Dont announce in Tag modes
 				{
-					if (gPlayerInfo[p1].onThisMachine || gPlayerInfo[p2].onThisMachine)			// one of them must be on this machine
+					if ((!gPlayerInfo[p1].isComputer) || (!gPlayerInfo[p2].isComputer))		// and one of them must be human
 					{
-						if ((!gPlayerInfo[p1].isComputer) || (!gPlayerInfo[p2].isComputer))		// and one of them must be human
+						short quip = EFFECT_GOTTAHURT;
+						float delay = .4f;
+						switch(TickCount() & 0x3)										// use tick count as a random # generator since we cannot get a real Random # b/c that would hoze the seed
 						{
-							switch(TickCount() & 0x3)										// use tick count as a random # generator since we cannot get a real Random # b/c that would hoze the seed
-							{
-								case	0:
-										PlayAnnouncerSound(EFFECT_GOTTAHURT, false, .3);
-										break;
-
-								case	1:
-										PlayAnnouncerSound(EFFECT_NICEDRIVING, false, .4);
-										break;
-
-								case	2:
-										PlayAnnouncerSound(EFFECT_COSTYA, false, .4);
-										break;
-
-								case	3:
-										PlayAnnouncerSound(EFFECT_WATCHIT, false, .4);
-										break;
-							}
+							case 0: quip = EFFECT_GOTTAHURT;   delay = .3f; break;
+							case 1: quip = EFFECT_NICEDRIVING; break;
+							case 2: quip = EFFECT_COSTYA;      break;
+							case 3: quip = EFFECT_WATCHIT;     break;
 						}
+						PlayPlayerAnnouncerSound(p1, quip, false, delay);
+						PlayPlayerAnnouncerSound(p2, quip, false, delay);
 					}
 				}
 			}
@@ -2217,7 +2215,7 @@ short		p2 = car2->PlayerNum;
 
 	if (relSpeed > 500.0f && canDoBumpFeedback)
 	{
-		PlayEffect3D(EFFECT_CRASH2, &gCoord);
+		PlayEffect_Parms3DSynced(EFFECT_CRASH2, &gCoord, NORMAL_CHANNEL_RATE, 1.0f);
 		didBumpFeedback = true;
 	}
 
@@ -3042,38 +3040,38 @@ short		playerNum = head->PlayerNum;
 
 					head->HEAD_THROW_READY_FLAG = false;
 
-
+					if (!gIsNetworkClient)
+					{
 							/* GET WEAPON TYPE TO THROW */
 
-					// Use powTypeBeingThrown rather than powType, because we may have
-					// picked up another POW since the animation started playing.
-					powType = gPlayerInfo[playerNum].powTypeBeingThrown;
+						// Use powTypeBeingThrown rather than powType, because we may have
+						// picked up another POW since the animation started playing.
+						powType = gPlayerInfo[playerNum].powTypeBeingThrown;
 
 
 							/* THROW THE APPROPRIATE WEAPON */
 
-					switch(powType)
-					{
-						case	POW_TYPE_BONE:
-								ThrowBone(playerNum, throwForward);
-								break;
+						switch(powType)
+						{
+							case	POW_TYPE_BONE:
+									ThrowBone(playerNum, throwForward);
+									break;
 
-						case	POW_TYPE_OIL:
-								ThrowOil(playerNum, throwForward);
-								break;
+							case	POW_TYPE_OIL:
+									ThrowOil(playerNum, throwForward);
+									break;
 
-						case	POW_TYPE_BIRDBOMB:
-								ThrowBirdBomb(playerNum, throwForward);
-								break;
+							case	POW_TYPE_BIRDBOMB:
+									ThrowBirdBomb(playerNum, throwForward);
+									break;
 
-						case	POW_TYPE_FREEZE:
-								ThrowFreeze(playerNum, throwForward);
-								break;
+							case	POW_TYPE_FREEZE:
+									ThrowFreeze(playerNum, throwForward);
+									break;
+						}
 					}
 
-
 					gPlayerInfo[playerNum].powTypeBeingThrown = POW_TYPE_NONE;
-
 				}
 
 
@@ -3480,13 +3478,10 @@ ObjNode	*obj;
 				{
 					if (d <= (radius * .7f))
 					{
-						if ((gPlayerInfo[whoThrew].onThisMachine) && (!gPlayerInfo[whoThrew].isComputer))
-						{
-							if (TickCount() & 1)										// use tick count as a random # generator since we cannot get a real Random # b/c that would hoze the seed
-								PlayAnnouncerSound(EFFECT_NICESHOT, false, .9);
-							else
-								PlayAnnouncerSound(EFFECT_OHYEAH, false, .9);
-						}
+						if (TickCount() & 1)										// use tick count as a random # generator since we cannot get a real Random # b/c that would hoze the seed
+							PlayPlayerAnnouncerSound(whoThrew, EFFECT_NICESHOT, false, .9);
+						else
+							PlayPlayerAnnouncerSound(whoThrew, EFFECT_OHYEAH, false, .9);
 					}
 				}
 			}

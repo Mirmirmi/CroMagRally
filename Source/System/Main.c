@@ -963,7 +963,6 @@ static void PlayArea(void)
 			ClientReceive_ControlInfoFromHost();
 
 			MoveEverything();
-			Net_ClientUpdateVisualFrame();
 			if (gGameMode == GAME_MODE_TAG1 || gGameMode == GAME_MODE_TAG2)
 				UpdateTagMarker();
 			DoPlayerTerrainUpdate();
@@ -1108,8 +1107,11 @@ void MoveEverything(void)
 	MoveSplineObjects();
 	MoveObjects();
 	MoveParticleGroups();
+	if (gIsNetworkClient)
+		Net_ClientUpdateVisualFrame();			// sync client transforms BEFORE camera & skid updates
 	UpdateCameras(false, false);				// update cameras for ALL players
-	CalcPlayerPlaces();							// determinw who is in what place
+	if (!gIsNetworkClient)
+		CalcPlayerPlaces();						// determine who is in what place (host-authoritative in LAN)
 	UpdateSkidMarks();							// update skid marks
 	UpdateLiquidAnimation();					// update liquid animation
 

@@ -345,6 +345,8 @@ void ActivateNitroPOW(short playerNum);
 void ThrowBirdBomb(short playerNum, Boolean throwForward);
 void ThrowFreeze(short playerNum, Boolean throwForward);
 Boolean DoTrig_LandMine(ObjNode *theNode, ObjNode *whoNode, Byte sideBits);
+void PlayWeaponExplosionFX(short explosionKind, const OGLPoint3D *where);
+void UpdateClientProjectileTrail(ObjNode *theNode);
 
 
 		/* SKID MARKS */

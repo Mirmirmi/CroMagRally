@@ -168,7 +168,7 @@ static const MenuItem gHostLobbyMenuTree[] =
 	{kMILabel, STR_NULL, .id=5, .getDynamicText=GetPlayerRowText, .getLayoutFlags=IsPlayerRowHidden, .customHeight=0.55f },
 	{kMISpacer, .customHeight=0.5f },
 	{
-		kMICycler2, STR_GAME_MODE, .callback=OnHostModeChanged, .cycler=
+		kMICycler1, STR_GAME_MODE, .callback=OnHostModeChanged, .cycler=
 		{
 			.valuePtr=&sHostLobbyMode, .choices=
 			{
@@ -491,6 +491,14 @@ static int RunClientWaitRoom(void)
 
 	SetupNetLobbyView();
 	int waitPick = StartMenu(gClientWaitMenuTree, &style, UpdateClientWaitMenu, DrawObjects);
+	if (waitPick == 2)
+	{
+		/* Render the lobby backdrop before showing the OS alert so the window is not blank */
+		OGL_DrawScene(DrawObjects);
+		const char* status = NULL;
+		Net_GetConnectionState(&status);
+		DoAlert("Connection ended: %s", status ? status : "Disconnected");
+	}
 	CleanupNetLobbyView();
 	return waitPick;
 }
@@ -555,13 +563,7 @@ Boolean SetupNetworkJoin(void)
 			return false; /* Host launched match! */
 		}
 
-		if (waitPick == 2)
-		{
-			const char* status = NULL;
-			Net_GetConnectionState(&status);
-			DoAlert("Connection ended: %s", status ? status : "Disconnected");
-		}
-		else
+		if (waitPick != 2)
 		{
 			Net_DisconnectGracefully();
 		}
@@ -586,13 +588,7 @@ Boolean ReenterClientLobby(void)
 		return false; /* Host launched next match! */
 	}
 
-	if (waitPick == 2)
-	{
-		const char* status = NULL;
-		Net_GetConnectionState(&status);
-		DoAlert("Connection ended: %s", status ? status : "Disconnected");
-	}
-	else
+	if (waitPick != 2)
 	{
 		Net_DisconnectGracefully();
 	}

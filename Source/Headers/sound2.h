@@ -171,6 +171,7 @@ void PlaySong(short songNum, Boolean loopFlag);
 extern void	KillSong(void);
 extern	short PlayEffect(short effectNum);
 short PlayEffect_Parms3D(short effectNum, const OGLPoint3D *where, uint32_t rateMultiplier, float volumeAdjust);
+short PlayEffect_Parms3DSynced(short effectNum, const OGLPoint3D *where, uint32_t rateMultiplier, float volumeAdjust);
 extern void	DoSoundMaintenance(void);
 short PlayEffect_Parms(short effectNum, uint32_t leftVolume, uint32_t rightVolume, unsigned long rateMultiplier);
 void ChangeChannelVolume(short channel, uint32_t leftVol, uint32_t rightVol);
@@ -185,5 +186,6 @@ void UpdateGlobalVolume(void);
 void PauseAllChannels(Boolean pause);
 
 void PlayAnnouncerSound(short effectNum, Boolean override, float delay);
+void PlayPlayerAnnouncerSound(short playerNum, short effectNum, Boolean override, float delay);
 
 void FadeSound(float globalVolumeMultiplier);

@@ -37,6 +37,14 @@ static void ExplodeTorpedo(ObjNode *theBullet, const OGLPoint3D *where);
 static void MoveFreezeWeapon(ObjNode *theNode);
 static void MoveLandMine(ObjNode *theNode);
 static void DropLandMine(short playerNum);
+static void SpawnWeaponTrailSparks(ObjNode *theNode, const OGLPoint3D *pos, float fps,
+	float gravity, float decayRate, float fadeRate, Byte textureNum, int dstBlend,
+	int count, float posSpreadXZ, float posSpreadY, Boolean symmetricY,
+	float velSpreadXZ, float velSpreadY, float rotZRange);
+static void SpawnExplosionSparkBurst(const OGLPoint3D *where, uint32_t flags, float gravity,
+	float baseScale, float decayRate, float fadeRate, Byte textureNum,
+	int count, float posSpreadXZ, float posOffsetY, float posSpreadY,
+	float velSpreadXZ, float velSpreadY, float velBaseY, float rotDZ);
 
 
 /****************************/
@@ -168,7 +176,7 @@ short		powType;
 		(powType == POW_TYPE_ROMANCANDLE || powType == POW_TYPE_BOTTLEROCKET ||
 		 powType == POW_TYPE_TORPEDO || powType == POW_TYPE_MINE))
 	{
-		PlayEffect_Parms3D(EFFECT_THROW_HUMDINGER, &gPlayerInfo[playerNum].coord, NORMAL_CHANNEL_RATE, 3.5f);
+		PlayEffect_Parms3DSynced(EFFECT_THROW_HUMDINGER, &gPlayerInfo[playerNum].coord, NORMAL_CHANNEL_RATE, 3.5f);
 	}
 }
 
@@ -180,7 +188,7 @@ void ActivateNitroPOW(short playerNum)
 	DecCurrentPOWQuantity(playerNum);
 	gPlayerInfo[playerNum].nitroTimer += NITRO_DURATION;		// give player more nitro
 
-	PlayEffect_Parms3D(EFFECT_NITRO, &gPlayerInfo[playerNum].coord, NORMAL_CHANNEL_RATE, 1.5);
+	PlayEffect_Parms3DSynced(EFFECT_NITRO, &gPlayerInfo[playerNum].coord, NORMAL_CHANNEL_RATE, 1.5);
 
 }
 
@@ -210,15 +218,15 @@ static void PlayerThrowsWeapon(short playerNum, Boolean forwardThrow)
 			MorphToSkeletonAnim(head->Skeleton, PLAYER_ANIM_THROWBACKWARD, 8.0);
 
 		if (pinfo->sex == SKELETON_TYPE_PLAYER_HUMDINGER)
-			PlayEffect_Parms3D(EFFECT_THROW_HUMDINGER, &pinfo->coord, NORMAL_CHANNEL_RATE, 3.5f);
+			PlayEffect_Parms3DSynced(EFFECT_THROW_HUMDINGER, &pinfo->coord, NORMAL_CHANNEL_RATE, 3.5f);
 		else
 		if (pinfo->sex >= SKELETON_TYPE_PLAYER_CHASE && pinfo->sex <= SKELETON_TYPE_PLAYER_ROCKY)
-			PlayEffect_Parms3D(EFFECT_THROW_CHASE, &gCoord, NORMAL_CHANNEL_RATE, 1.5);
+			PlayEffect_Parms3DSynced(EFFECT_THROW_CHASE, &pinfo->coord, NORMAL_CHANNEL_RATE, 1.5);
 		else
 		if (pinfo->sex == SKELETON_TYPE_PLAYER_FEMALE)
-			PlayEffect_Parms3D(EFFECT_THROW1 + RandomRange(0,2), &gCoord, NORMAL_CHANNEL_RATE + 0x5000, 1.5);
+			PlayEffect_Parms3DSynced(EFFECT_THROW1 + RandomRange(0,2), &pinfo->coord, NORMAL_CHANNEL_RATE + 0x5000, 1.5);
 		else
-			PlayEffect_Parms3D(EFFECT_THROW1 + RandomRange(0,2), &gCoord, NORMAL_CHANNEL_RATE, 1.5);
+			PlayEffect_Parms3DSynced(EFFECT_THROW1 + RandomRange(0,2), &pinfo->coord, NORMAL_CHANNEL_RATE, 1.5);
 
 
 			/* REMEMBER POW TYPE UNTIL ANIM IS READY TO CREATE BULLET */
@@ -420,9 +428,79 @@ ObjNode						*newObj,*head,*car;
 	newObj->FreezeBombTimer = 1.7;
 
 
-	PlayEffect_Parms3D(EFFECT_SNOWBALL, &car->Coord, NORMAL_CHANNEL_RATE-0x4000, 4.0);
+	PlayEffect_Parms3DSynced(EFFECT_SNOWBALL, &car->Coord, NORMAL_CHANNEL_RATE-0x4000, 4.0);
 	Net_RegisterWeaponObj(newObj, 0);
 
+}
+
+
+/********************** SPAWN WEAPON TRAIL SPARKS **************************/
+
+static void SpawnWeaponTrailSparks(ObjNode *theNode, const OGLPoint3D *pos, float fps,
+	float gravity, float decayRate, float fadeRate, Byte textureNum, int dstBlend,
+	int count, float posSpreadXZ, float posSpreadY, Boolean symmetricY,
+	float velSpreadXZ, float velSpreadY, float rotZRange)
+{
+	int						particleGroup, magicNum;
+	NewParticleGroupDefType	groupDef;
+	NewParticleDefType		newParticleDef;
+
+	theNode->ParticleTimer -= fps;
+	if (theNode->ParticleTimer >= 0.0f)
+		return;
+
+	theNode->ParticleTimer += .03f;
+
+	particleGroup 	= theNode->ParticleGroup;
+	magicNum 		= theNode->ParticleMagicNum;
+
+	if ((particleGroup == -1) || (!VerifyParticleGroupMagicNum(particleGroup, magicNum)))
+	{
+		theNode->ParticleMagicNum = magicNum = MyRandomLong();			// generate a random magic num
+
+		groupDef.magicNum			= magicNum;
+		groupDef.type				= PARTICLE_TYPE_FALLINGSPARKS;
+		groupDef.flags				= PARTICLE_FLAGS_BOUNCE;
+		groupDef.gravity			= gravity;
+		groupDef.magnetism			= 0;
+		groupDef.baseScale			= 20.0f;
+		groupDef.decayRate			= decayRate;
+		groupDef.fadeRate			= fadeRate;
+		groupDef.particleTextureNum	= textureNum;
+		groupDef.srcBlend			= GL_SRC_ALPHA;
+		groupDef.dstBlend			= dstBlend;
+		theNode->ParticleGroup = particleGroup = NewParticleGroup(&groupDef);
+	}
+
+	if (particleGroup != -1)
+	{
+		for (int i = 0; i < count; i++)
+		{
+			OGLPoint3D	p;
+			OGLVector3D	d;
+
+			p.x = pos->x + RandomFloat2() * posSpreadXZ;
+			p.y = pos->y + (symmetricY ? RandomFloat2() : RandomFloat()) * posSpreadY;
+			p.z = pos->z + RandomFloat2() * posSpreadXZ;
+
+			d.x = RandomFloat2() * velSpreadXZ;
+			d.y = RandomFloat2() * velSpreadY;
+			d.z = RandomFloat2() * velSpreadXZ;
+
+			newParticleDef.groupNum	= particleGroup;
+			newParticleDef.where	= &p;
+			newParticleDef.delta	= &d;
+			newParticleDef.scale	= RandomFloat() + 1.0f;
+			newParticleDef.rotZ		= RandomFloat() * rotZRange;
+			newParticleDef.rotDZ	= RandomFloat2();
+			newParticleDef.alpha	= 1.0f;
+			if (AddParticleToGroup(&newParticleDef))
+			{
+				theNode->ParticleGroup = -1;
+				break;
+			}
+		}
+	}
 }
 
 
@@ -474,72 +552,9 @@ boom:
 			/* MAKE SPARKS */
 			/***************/
 
-	theNode->ParticleTimer -= fps;
-	if (theNode->ParticleTimer < 0.0f)
-	{
-		int		particleGroup,magicNum;
-		NewParticleGroupDefType	groupDef;
-		NewParticleDefType	newParticleDef;
-
-		theNode->ParticleTimer += .03f;
-
-		particleGroup 	= theNode->ParticleGroup;
-		magicNum 		= theNode->ParticleMagicNum;
-
-		if ((particleGroup == -1) || (!VerifyParticleGroupMagicNum(particleGroup, magicNum)))
-		{
-			theNode->ParticleMagicNum = magicNum = MyRandomLong();			// generate a random magic num
-
-			groupDef.magicNum				= magicNum;
-			groupDef.type					= PARTICLE_TYPE_FALLINGSPARKS;
-			groupDef.flags					= PARTICLE_FLAGS_BOUNCE;
-			groupDef.gravity				= 200;
-			groupDef.magnetism				= 0;
-			groupDef.baseScale				= 20.0f;
-			groupDef.decayRate				=  1.0;
-			groupDef.fadeRate				= 1.0;
-			groupDef.particleTextureNum		= PARTICLE_SObjType_SnowFlakes;
-			groupDef.srcBlend				= GL_SRC_ALPHA;
-			groupDef.dstBlend				= GL_ONE;
-			theNode->ParticleGroup = particleGroup = NewParticleGroup(&groupDef);
-		}
-
-		if (particleGroup != -1)
-		{
-			float	x,y,z;
-			int		i;
-			OGLPoint3D	p;
-			OGLVector3D	d;
-
-			x = gCoord.x;
-			y = gCoord.y;
-			z = gCoord.z;
-
-			for (i = 0; i < 8; i++)
-			{
-				p.x = x + RandomFloat2() * 20.0;
-				p.y = y + RandomFloat() * 60.0f;
-				p.z = z + RandomFloat2() * 20.0f;
-
-				d.x = RandomFloat2() * 20.0f;
-				d.y = RandomFloat2() * 10.0f;
-				d.z = RandomFloat2() * 20.0f;
-
-				newParticleDef.groupNum		= particleGroup;
-				newParticleDef.where		= &p;
-				newParticleDef.delta		= &d;
-				newParticleDef.scale		= RandomFloat() + 1.0f;
-				newParticleDef.rotZ			= RandomFloat() * 10.0f;
-				newParticleDef.rotDZ		= RandomFloat2();
-				newParticleDef.alpha		= 1.0;
-				if (AddParticleToGroup(&newParticleDef))
-				{
-					theNode->ParticleGroup = -1;
-					break;
-				}
-			}
-		}
-	}
+	SpawnWeaponTrailSparks(theNode, &gCoord, fps,
+		200.0f, 1.0f, 1.0f, PARTICLE_SObjType_SnowFlakes, GL_ONE,
+		8, 20.0f, 60.0f, false, 20.0f, 10.0f, 10.0f);
 }
 
 
@@ -938,7 +953,7 @@ ObjNode		*newObj, *car;
 
 	newObj->Mode = 0;																	// shoot up
 
-	PlayEffect3D(EFFECT_ROMANCANDLE_LAUNCH, &def.coord);
+	PlayEffect_Parms3DSynced(EFFECT_ROMANCANDLE_LAUNCH, &def.coord, NORMAL_CHANNEL_RATE, 1.0f);
 	Net_RegisterWeaponObj(newObj, 0);
 }
 
@@ -948,9 +963,6 @@ ObjNode		*newObj, *car;
 
 static void MoveRomanCandle(ObjNode *theNode)
 {
-int		particleGroup,magicNum;
-NewParticleGroupDefType	groupDef;
-NewParticleDefType	newParticleDef;
 float fps = gFramesPerSecondFrac;
 ObjNode		*car;
 Boolean		makeSparks = false;
@@ -1004,7 +1016,7 @@ float		dist;
 					theNode->Delta.z = gPlayerInfo[targetP].objNode->Delta.z;
 					theNode->Delta.y = -4000;
 
-					theNode->EffectChannel = PlayEffect3D(EFFECT_ROMANCANDLE_FALL, &theNode->Coord);  // XXX: this was gNewObjectDefinition.coord! mistake?
+					theNode->EffectChannel = PlayEffect_Parms3DSynced(EFFECT_ROMANCANDLE_FALL, &theNode->Coord, NORMAL_CHANNEL_RATE, 1.0f);  // XXX: this was gNewObjectDefinition.coord! mistake?
 
 				}
 				break;
@@ -1045,70 +1057,169 @@ float		dist;
 
 	if (makeSparks)
 	{
-		theNode->ParticleTimer -= fps;
-		if (theNode->ParticleTimer < 0.0f)
-		{
-			theNode->ParticleTimer += .03f;
-
-			particleGroup 	= theNode->ParticleGroup;
-			magicNum 		= theNode->ParticleMagicNum;
-
-			if ((particleGroup == -1) || (!VerifyParticleGroupMagicNum(particleGroup, magicNum)))
-			{
-				theNode->ParticleMagicNum = magicNum = MyRandomLong();			// generate a random magic num
-
-				groupDef.magicNum				= magicNum;
-				groupDef.type					= PARTICLE_TYPE_FALLINGSPARKS;
-				groupDef.flags					= PARTICLE_FLAGS_BOUNCE;
-				groupDef.gravity				= 200;
-				groupDef.magnetism				= 0;
-				groupDef.baseScale				= 20.0f;
-				groupDef.decayRate				=  1.0;
-				groupDef.fadeRate				= 1.0;
-				groupDef.particleTextureNum		= PARTICLE_SObjType_Fire;
-				groupDef.srcBlend				= GL_SRC_ALPHA;
-				groupDef.dstBlend				= GL_ONE;
-				theNode->ParticleGroup = particleGroup = NewParticleGroup(&groupDef);
-			}
-
-			if (particleGroup != -1)
-			{
-				float	x,y,z;
-				int		i;
-				OGLPoint3D	p;
-				OGLVector3D	d;
-
-				x = gCoord.x;
-				y = gCoord.y;
-				z = gCoord.z;
-
-				for (i = 0; i < 8; i++)
-				{
-					p.x = x + RandomFloat2() * 30.0;
-					p.y = y + RandomFloat2() * 80.0f;
-					p.z = z + RandomFloat2() * 30.0f;
-
-					d.x = RandomFloat2() * 30.0f;
-					d.y = RandomFloat2() * 20.0f;
-					d.z = RandomFloat2() * 30.0f;
-
-					newParticleDef.groupNum		= particleGroup;
-					newParticleDef.where		= &p;
-					newParticleDef.delta		= &d;
-					newParticleDef.scale		= RandomFloat() + 1.0f;
-					newParticleDef.rotZ			= RandomFloat() * 10.0f;
-					newParticleDef.rotDZ		= RandomFloat2();
-					newParticleDef.alpha		= 1.0;
-					if (AddParticleToGroup(&newParticleDef))
-					{
-						theNode->ParticleGroup = -1;
-						break;
-					}
-				}
-			}
-		}
+		SpawnWeaponTrailSparks(theNode, &gCoord, fps,
+			200.0f, 1.0f, 1.0f, PARTICLE_SObjType_Fire, GL_ONE,
+			8, 30.0f, 80.0f, true, 30.0f, 20.0f, 10.0f);
 	}
 
+}
+
+
+/******************** SPAWN EXPLOSION SPARK BURST ****************************/
+
+static void SpawnExplosionSparkBurst(const OGLPoint3D *where, uint32_t flags, float gravity,
+	float baseScale, float decayRate, float fadeRate, Byte textureNum,
+	int count, float posSpreadXZ, float posOffsetY, float posSpreadY,
+	float velSpreadXZ, float velSpreadY, float velBaseY, float rotDZ)
+{
+	long				pg;
+	NewParticleDefType	newParticleDef;
+
+	gNewParticleGroupDef.magicNum			= 0;
+	gNewParticleGroupDef.type				= PARTICLE_TYPE_FALLINGSPARKS;
+	gNewParticleGroupDef.flags				= flags;
+	gNewParticleGroupDef.gravity			= gravity;
+	gNewParticleGroupDef.magnetism			= 0;
+	gNewParticleGroupDef.baseScale			= baseScale;
+	gNewParticleGroupDef.decayRate			= decayRate;
+	gNewParticleGroupDef.fadeRate			= fadeRate;
+	gNewParticleGroupDef.particleTextureNum	= textureNum;
+	gNewParticleGroupDef.srcBlend			= GL_SRC_ALPHA;
+	gNewParticleGroupDef.dstBlend			= GL_ONE;
+	pg = NewParticleGroup(&gNewParticleGroupDef);
+	if (pg == -1)
+		return;
+
+	for (int i = 0; i < count; i++)
+	{
+		OGLPoint3D	pt;
+		OGLVector3D	d;
+
+		pt.x = where->x + RandomFloat2() * posSpreadXZ;
+		pt.y = where->y + posOffsetY + RandomFloat2() * posSpreadY;
+		pt.z = where->z + RandomFloat2() * posSpreadXZ;
+
+		d.x = velSpreadXZ != 0.0f ? RandomFloat2() * velSpreadXZ : 0.0f;
+		d.y = velBaseY + (velSpreadY != 0.0f ? RandomFloat2() * velSpreadY : 0.0f);
+		d.z = velSpreadXZ != 0.0f ? RandomFloat2() * velSpreadXZ : 0.0f;
+
+		newParticleDef.groupNum	= pg;
+		newParticleDef.where	= &pt;
+		newParticleDef.delta	= &d;
+		newParticleDef.scale	= RandomFloat() + 1.5f;
+		newParticleDef.rotZ		= 0;
+		newParticleDef.rotDZ	= rotDZ;
+		newParticleDef.alpha	= FULL_ALPHA + (RandomFloat() * .3f);
+		AddParticleToGroup(&newParticleDef);
+	}
+}
+
+
+/******************** PLAY WEAPON EXPLOSION FX ****************************/
+
+void PlayWeaponExplosionFX(short explosionKind, const OGLPoint3D *where)
+{
+	if (!where)
+		return;
+
+	if (gIsNetworkHost)
+		Net_HostSendExplosion(where->x, where->y, where->z, explosionKind);
+
+	switch (explosionKind)
+	{
+		case kNetExplosion_RomanCandle:
+			SpawnExplosionSparkBurst(where, PARTICLE_FLAGS_BOUNCE, 1000.0f, 20.0f, 1.0f, 0.0f,
+				PARTICLE_SObjType_WhiteSpark, 200, 60.0f, 60.0f, 60.0f, 800.0f, 800.0f, 0.0f, 0.0f);
+			SpawnExplosionSparkBurst(where, PARTICLE_FLAGS_BOUNCE, 1000.0f, 20.0f, 1.0f, 0.0f,
+				PARTICLE_SObjType_RedSpark, 200, 60.0f, 60.0f, 60.0f, 1000.0f, 1000.0f, 0.0f, 30.0f);
+			PlayEffect_Parms3D(EFFECT_BOOM, where, NORMAL_CHANNEL_RATE*3/2, 4);
+			break;
+
+		case kNetExplosion_BottleRocket:
+			SpawnExplosionSparkBurst(where, PARTICLE_FLAGS_BOUNCE, 1000.0f, 20.0f, 1.0f, 0.0f,
+				PARTICLE_SObjType_RedSpark, 230, 60.0f, 60.0f, 60.0f, 800.0f, 800.0f, 0.0f, 0.0f);
+			SpawnExplosionSparkBurst(where, PARTICLE_FLAGS_BOUNCE, 1000.0f, 20.0f, 1.0f, 0.0f,
+				PARTICLE_SObjType_BlueSpark, 230, 60.0f, 60.0f, 60.0f, 1000.0f, 1000.0f, 0.0f, 30.0f);
+			PlayEffect_Parms3D(EFFECT_BOOM, where, NORMAL_CHANNEL_RATE*3/2, 4);
+			break;
+
+		case kNetExplosion_Torpedo:
+			SpawnExplosionSparkBurst(where, PARTICLE_FLAGS_DONTCHECKGROUND, -40.0f, 5.0f, 0.0f, 0.2f,
+				PARTICLE_SObjType_Bubbles, 100, 160.0f, 0.0f, 160.0f, 0.0f, 0.0f, 800.0f, 0.0f);
+			SpawnExplosionSparkBurst(where, PARTICLE_FLAGS_BOUNCE, 0.0f, 20.0f, 0.0f, 2.0f,
+				PARTICLE_SObjType_WhiteSpark, 200, 60.0f, 0.0f, 60.0f, 500.0f, 500.0f, 0.0f, 0.0f);
+			PlayEffect_Parms3D(EFFECT_BOOM, where, NORMAL_CHANNEL_RATE/2, 4);
+			break;
+
+		case kNetExplosion_LandMine:
+			MakeSparkExplosion(where->x, where->y + 50.0f, where->z, 60.0f, PARTICLE_SObjType_Fire);
+			MakeConeBlast(where->x, where->y, where->z);
+			PlayEffect_Parms3D(EFFECT_BOOM, where, NORMAL_CHANNEL_RATE + 0x1000, 4);
+			break;
+	}
+}
+
+
+/******************** UPDATE CLIENT PROJECTILE TRAIL ****************************/
+
+void UpdateClientProjectileTrail(ObjNode *theNode)
+{
+	float		fps = gFramesPerSecondFrac;
+	OGLPoint3D	bubblePt;
+
+	if (!theNode)
+		return;
+
+	if (theNode->StatusBits & STATUS_BIT_HIDDEN)
+	{
+		if (theNode->EffectChannel != -1)
+			StopAChannel(&theNode->EffectChannel);
+		return;
+	}
+
+	if (theNode->Genre == SKELETON_GENRE && theNode->Type == SKELETON_TYPE_BIRDBOMB)
+	{
+		if (theNode->EffectChannel != -1)
+			Update3DSoundChannel(EFFECT_BIRDCAW, &theNode->EffectChannel, &theNode->Coord);
+		else
+			theNode->EffectChannel = PlayEffect_Parms3D(EFFECT_BIRDCAW, &theNode->Coord, NORMAL_CHANNEL_RATE, 1.0f);
+		return;
+	}
+
+	switch (theNode->Type)
+	{
+		case WEAPONS_ObjType_FreezeBullet:
+			SpawnWeaponTrailSparks(theNode, &theNode->Coord, fps,
+				200.0f, 1.0f, 1.0f, PARTICLE_SObjType_SnowFlakes, GL_ONE,
+				8, 20.0f, 60.0f, false, 20.0f, 10.0f, 10.0f);
+			break;
+
+		case WEAPONS_ObjType_RomanCandleBullet:
+			SpawnWeaponTrailSparks(theNode, &theNode->Coord, fps,
+				200.0f, 1.0f, 1.0f, PARTICLE_SObjType_Fire, GL_ONE,
+				8, 30.0f, 80.0f, true, 30.0f, 20.0f, 10.0f);
+			break;
+
+		case WEAPONS_ObjType_BottleRocketBullet:
+			SpawnWeaponTrailSparks(theNode, &theNode->Coord, fps,
+				0.0f, -0.4f, 1.5f, PARTICLE_SObjType_GreySmoke, GL_ONE_MINUS_SRC_ALPHA,
+				4, 20.0f, 20.0f, true, 20.0f, 20.0f, 4.0f);
+			break;
+
+		case WEAPONS_ObjType_Torpedo:
+			bubblePt = theNode->Coord;
+			theNode->ParticleTimer -= fps;
+			if (theNode->ParticleTimer < 0.0f)
+			{
+				theNode->ParticleTimer += .03f;
+				MakeBubbles(theNode, &bubblePt, .15, 2.5);
+			}
+			if (theNode->EffectChannel != -1)
+				Update3DSoundChannel(EFFECT_HUM, &theNode->EffectChannel, &theNode->Coord);
+			else
+				theNode->EffectChannel = PlayEffect_Parms3D(EFFECT_HUM, &theNode->Coord, NORMAL_CHANNEL_RATE + 0x2000, 1.0f);
+			break;
+	}
 }
 
 
@@ -1116,98 +1227,9 @@ float		dist;
 
 static void ExplodeRomanCandle(ObjNode *theBullet, const OGLPoint3D *where)
 {
-long					pg,i;
-OGLVector3D				d;
-OGLPoint3D				pt;
-NewParticleDefType		newParticleDef;
 ObjNode					*whoThrew;
 
-		/*********************/
-		/* MAKE WHITE SPARKS */
-		/*********************/
-
-	gNewParticleGroupDef.magicNum				= 0;
-	gNewParticleGroupDef.type					= PARTICLE_TYPE_FALLINGSPARKS;
-	gNewParticleGroupDef.flags					= PARTICLE_FLAGS_BOUNCE;
-	gNewParticleGroupDef.gravity				= 1000;
-	gNewParticleGroupDef.magnetism				= 0;
-	gNewParticleGroupDef.baseScale				= 20;
-	gNewParticleGroupDef.decayRate				= 1.0;
-	gNewParticleGroupDef.fadeRate				= 0;
-	gNewParticleGroupDef.particleTextureNum		= PARTICLE_SObjType_WhiteSpark;
-	gNewParticleGroupDef.srcBlend				= GL_SRC_ALPHA;
-	gNewParticleGroupDef.dstBlend				= GL_ONE;
-	pg = NewParticleGroup(&gNewParticleGroupDef);
-	if (pg != -1)
-	{
-		for (i = 0; i < 200; i++)
-		{
-			pt.x = where->x + RandomFloat2() * 60.0f;
-			pt.y = where->y + 60.0 + RandomFloat2() * 60.0f;
-			pt.z = where->z + RandomFloat2() * 60.0f;
-
-			d.y = RandomFloat2() * 800.0f;
-			d.x = RandomFloat2() * 800.0f;
-			d.z = RandomFloat2() * 800.0f;
-
-
-			newParticleDef.groupNum		= pg;
-			newParticleDef.where		= &pt;
-			newParticleDef.delta		= &d;
-			newParticleDef.scale		= RandomFloat() + 1.5f;
-			newParticleDef.rotZ			= 0;
-			newParticleDef.rotDZ		= 0;
-			newParticleDef.alpha		= FULL_ALPHA + (RandomFloat() * .3f);
-			AddParticleToGroup(&newParticleDef);
-		}
-	}
-
-
-		/*********************/
-		/* MAKE RED SPARKS */
-		/*********************/
-
-	gNewParticleGroupDef.magicNum				= 0;
-	gNewParticleGroupDef.type					= PARTICLE_TYPE_FALLINGSPARKS;
-	gNewParticleGroupDef.flags					= PARTICLE_FLAGS_BOUNCE;
-	gNewParticleGroupDef.gravity				= 1000;
-	gNewParticleGroupDef.magnetism				= 0;
-	gNewParticleGroupDef.baseScale				= 20;
-	gNewParticleGroupDef.decayRate				= 1.0;
-	gNewParticleGroupDef.fadeRate				= 0;
-	gNewParticleGroupDef.particleTextureNum		= PARTICLE_SObjType_RedSpark;
-	gNewParticleGroupDef.srcBlend				= GL_SRC_ALPHA;
-	gNewParticleGroupDef.dstBlend				= GL_ONE;
-	pg = NewParticleGroup(&gNewParticleGroupDef);
-	if (pg != -1)
-	{
-		for (i = 0; i < 200; i++)
-		{
-			pt.x = where->x + RandomFloat2() * 60.0f;
-			pt.y = where->y + 60.0 + RandomFloat2() * 60.0f;
-			pt.z = where->z + RandomFloat2() * 60.0f;
-
-			d.y = RandomFloat2() * 1000.0f;
-			d.x = RandomFloat2() * 1000.0f;
-			d.z = RandomFloat2() * 1000.0f;
-
-
-			newParticleDef.groupNum		= pg;
-			newParticleDef.where		= &pt;
-			newParticleDef.delta		= &d;
-			newParticleDef.scale		= RandomFloat() + 1.5f;
-			newParticleDef.rotZ			= 0;
-			newParticleDef.rotDZ		= 30.0;
-			newParticleDef.alpha		= FULL_ALPHA + (RandomFloat() * .3f);
-			AddParticleToGroup(&newParticleDef);
-		}
-	}
-
-
-
-
-	PlayEffect_Parms3D(EFFECT_BOOM, where, NORMAL_CHANNEL_RATE*3/2, 4);
-
+	PlayWeaponExplosionFX(kNetExplosion_RomanCandle, where);
 
 		/* SEE IF IT HIT ANY CARS */
 
@@ -1290,7 +1312,7 @@ short		targetP;
 	newObj->Delta.y = gDelta.y + 2000.0f;
 
 
-	PlayEffect3D(EFFECT_ROMANCANDLE_LAUNCH, &def.coord);
+	PlayEffect_Parms3DSynced(EFFECT_ROMANCANDLE_LAUNCH, &def.coord, NORMAL_CHANNEL_RATE, 1.0f);
 }
 
 
@@ -1298,9 +1320,6 @@ short		targetP;
 
 static void MoveBottleRocket(ObjNode *theNode)
 {
-int				particleGroup,magicNum;
-NewParticleGroupDefType	groupDef;
-NewParticleDefType	newParticleDef;
 float 			fps = gFramesPerSecondFrac;
 ObjNode			*car;
 static const OGLVector3D up = {0,1,0};
@@ -1365,68 +1384,9 @@ boom:
 			/* MAKE SMOKE */
 			/**************/
 
-	theNode->ParticleTimer -= fps;
-	if (theNode->ParticleTimer < 0.0f)
-	{
-		theNode->ParticleTimer += .03f;
-
-		particleGroup 	= theNode->ParticleGroup;
-		magicNum 		= theNode->ParticleMagicNum;
-
-		if ((particleGroup == -1) || (!VerifyParticleGroupMagicNum(particleGroup, magicNum)))
-		{
-			theNode->ParticleMagicNum = magicNum = MyRandomLong();			// generate a random magic num
-
-			groupDef.magicNum				= magicNum;
-			groupDef.type					= PARTICLE_TYPE_FALLINGSPARKS;
-			groupDef.flags					= PARTICLE_FLAGS_BOUNCE;
-			groupDef.gravity				= 0;
-			groupDef.magnetism				= 0;
-			groupDef.baseScale				= 20.0f;
-			groupDef.decayRate				=  -.4;
-			groupDef.fadeRate				= 1.5;
-			groupDef.particleTextureNum		= PARTICLE_SObjType_GreySmoke;
-			groupDef.srcBlend				= GL_SRC_ALPHA;
-			groupDef.dstBlend				= GL_ONE_MINUS_SRC_ALPHA;
-			theNode->ParticleGroup = particleGroup = NewParticleGroup(&groupDef);
-		}
-
-		if (particleGroup != -1)
-		{
-			float	x,y,z;
-			int		i;
-			OGLPoint3D	p;
-			OGLVector3D	d;
-
-			x = gCoord.x;
-			y = gCoord.y;
-			z = gCoord.z;
-
-			for (i = 0; i < 4; i++)
-			{
-				p.x = x + RandomFloat2() * 20.0;
-				p.y = y + RandomFloat2() * 20.0f;
-				p.z = z + RandomFloat2() * 20.0f;
-
-				d.x = RandomFloat2() * 20.0f;
-				d.y = RandomFloat2() * 20.0f;
-				d.z = RandomFloat2() * 20.0f;
-
-				newParticleDef.groupNum		= particleGroup;
-				newParticleDef.where		= &p;
-				newParticleDef.delta		= &d;
-				newParticleDef.scale		= RandomFloat() + 1.0f;
-				newParticleDef.rotZ			= RandomFloat() * 4.0f;
-				newParticleDef.rotDZ		= RandomFloat2();
-				newParticleDef.alpha		= 1.0;
-				if (AddParticleToGroup(&newParticleDef))
-				{
-					theNode->ParticleGroup = -1;
-					break;
-				}
-			}
-		}
-	}
+	SpawnWeaponTrailSparks(theNode, &gCoord, fps,
+		0.0f, -0.4f, 1.5f, PARTICLE_SObjType_GreySmoke, GL_ONE_MINUS_SRC_ALPHA,
+		4, 20.0f, 20.0f, true, 20.0f, 20.0f, 4.0f);
 
 }
 
@@ -1435,97 +1395,9 @@ boom:
 
 static void ExplodeBottleRocket(ObjNode *theBullet, const OGLPoint3D *where)
 {
-long					pg;
-OGLVector3D				d;
-OGLPoint3D				pt;
-NewParticleDefType		newParticleDef;
 ObjNode					*whoThrew;
 
-		/*********************/
-		/* MAKE RED SPARKS */
-		/*********************/
-
-	gNewParticleGroupDef.magicNum				= 0;
-	gNewParticleGroupDef.type					= PARTICLE_TYPE_FALLINGSPARKS;
-	gNewParticleGroupDef.flags					= PARTICLE_FLAGS_BOUNCE;
-	gNewParticleGroupDef.gravity				= 1000;
-	gNewParticleGroupDef.magnetism				= 0;
-	gNewParticleGroupDef.baseScale				= 20;
-	gNewParticleGroupDef.decayRate				= 1.0;
-	gNewParticleGroupDef.fadeRate				= 0;
-	gNewParticleGroupDef.particleTextureNum		= PARTICLE_SObjType_RedSpark;
-	gNewParticleGroupDef.srcBlend				= GL_SRC_ALPHA;
-	gNewParticleGroupDef.dstBlend				= GL_ONE;
-	pg = NewParticleGroup(&gNewParticleGroupDef);
-	if (pg != -1)
-	{
-		for (int i = 0; i < 230; i++)
-		{
-			pt.x = where->x + RandomFloat2() * 60.0f;
-			pt.y = where->y + 60.0f + RandomFloat2() * 60.0f;
-			pt.z = where->z + RandomFloat2() * 60.0f;
-
-			d.y = RandomFloat2() * 800.0f;
-			d.x = RandomFloat2() * 800.0f;
-			d.z = RandomFloat2() * 800.0f;
-
-
-			newParticleDef.groupNum		= pg;
-			newParticleDef.where		= &pt;
-			newParticleDef.delta		= &d;
-			newParticleDef.scale		= RandomFloat() + 1.5f;
-			newParticleDef.rotZ			= 0;
-			newParticleDef.rotDZ		= 0;
-			newParticleDef.alpha		= FULL_ALPHA + (RandomFloat() * .3f);
-			AddParticleToGroup(&newParticleDef);
-		}
-	}
-
-
-		/*********************/
-		/* MAKE BLUE SPARKS */
-		/*********************/
-
-	gNewParticleGroupDef.magicNum				= 0;
-	gNewParticleGroupDef.type					= PARTICLE_TYPE_FALLINGSPARKS;
-	gNewParticleGroupDef.flags					= PARTICLE_FLAGS_BOUNCE;
-	gNewParticleGroupDef.gravity				= 1000;
-	gNewParticleGroupDef.magnetism				= 0;
-	gNewParticleGroupDef.baseScale				= 20;
-	gNewParticleGroupDef.decayRate				=  1.0;
-	gNewParticleGroupDef.fadeRate				= 0;
-	gNewParticleGroupDef.particleTextureNum		= PARTICLE_SObjType_BlueSpark;
-	gNewParticleGroupDef.srcBlend				= GL_SRC_ALPHA;
-	gNewParticleGroupDef.dstBlend				= GL_ONE;
-	pg = NewParticleGroup(&gNewParticleGroupDef);
-	if (pg != -1)
-	{
-		for (int i = 0; i < 230; i++)
-		{
-			pt.x = where->x + RandomFloat2() * 60.0f;
-			pt.y = where->y + 60.0f + RandomFloat2() * 60.0f;
-			pt.z = where->z + RandomFloat2() * 60.0f;
-
-			d.y = RandomFloat2() * 1000.0f;
-			d.x = RandomFloat2() * 1000.0f;
-			d.z = RandomFloat2() * 1000.0f;
-
-
-			newParticleDef.groupNum		= pg;
-			newParticleDef.where		= &pt;
-			newParticleDef.delta		= &d;
-			newParticleDef.scale		= RandomFloat() + 1.5f;
-			newParticleDef.rotZ			= 0;
-			newParticleDef.rotDZ		= 30.0;
-			newParticleDef.alpha		= FULL_ALPHA + (RandomFloat() * .3f);
-			AddParticleToGroup(&newParticleDef);
-		}
-	}
-
-
-
-
-	PlayEffect_Parms3D(EFFECT_BOOM, where, NORMAL_CHANNEL_RATE*3/2, 4);
+	PlayWeaponExplosionFX(kNetExplosion_BottleRocket, where);
 
 
 		/* SEE IF IT HIT ANY CARS */
@@ -1576,7 +1448,7 @@ static const OGLPoint3D	nose = {0,0,-100};
 
 
 
-	PlayEffect_Parms3D(EFFECT_TORPEDOFIRE, &def.coord, NORMAL_CHANNEL_RATE, 3);
+	PlayEffect_Parms3DSynced(EFFECT_TORPEDOFIRE, &def.coord, NORMAL_CHANNEL_RATE, 3);
 	Net_RegisterWeaponObj(newObj, 0);
 
 }
@@ -1707,97 +1579,9 @@ boom:
 
 static void ExplodeTorpedo(ObjNode *theBullet, const OGLPoint3D *where)
 {
-long					pg,i;
-OGLVector3D				d;
-OGLPoint3D				pt;
-NewParticleDefType		newParticleDef;
 ObjNode					*whoThrew;
 
-		/****************/
-		/* MAKE BUBBLES */
-		/****************/
-
-	gNewParticleGroupDef.magicNum				= 0;
-	gNewParticleGroupDef.type					= PARTICLE_TYPE_FALLINGSPARKS;
-	gNewParticleGroupDef.flags					= PARTICLE_FLAGS_DONTCHECKGROUND;
-	gNewParticleGroupDef.gravity				= -40;
-	gNewParticleGroupDef.magnetism				= 0;
-	gNewParticleGroupDef.baseScale				= 5;
-	gNewParticleGroupDef.decayRate				= 0;
-	gNewParticleGroupDef.fadeRate				= .2;
-	gNewParticleGroupDef.particleTextureNum		= PARTICLE_SObjType_Bubbles;
-	gNewParticleGroupDef.srcBlend				= GL_SRC_ALPHA;
-	gNewParticleGroupDef.dstBlend				= GL_ONE;
-	pg = NewParticleGroup(&gNewParticleGroupDef);
-	if (pg != -1)
-	{
-		for (i = 0; i < 100; i++)
-		{
-			pt.x = where->x + RandomFloat2() * 160.0f;
-			pt.y = where->y + RandomFloat2() * 160.0f;
-			pt.z = where->z + RandomFloat2() * 160.0f;
-
-			d.y = 800;
-			d.x = 0;
-			d.z = 0;
-
-
-			newParticleDef.groupNum		= pg;
-			newParticleDef.where		= &pt;
-			newParticleDef.delta		= &d;
-			newParticleDef.scale		= RandomFloat() + 1.5f;
-			newParticleDef.rotZ			= 0;
-			newParticleDef.rotDZ		= 0;
-			newParticleDef.alpha		= FULL_ALPHA + (RandomFloat() * .3f);
-			AddParticleToGroup(&newParticleDef);
-		}
-	}
-
-
-		/*********************/
-		/* MAKE WHITE SPARKS */
-		/*********************/
-
-	gNewParticleGroupDef.magicNum				= 0;
-	gNewParticleGroupDef.type					= PARTICLE_TYPE_FALLINGSPARKS;
-	gNewParticleGroupDef.flags					= PARTICLE_FLAGS_BOUNCE;
-	gNewParticleGroupDef.gravity				= 0;
-	gNewParticleGroupDef.magnetism				= 0;
-	gNewParticleGroupDef.baseScale				= 20;
-	gNewParticleGroupDef.decayRate				= 0;
-	gNewParticleGroupDef.fadeRate				= 2.0;
-	gNewParticleGroupDef.particleTextureNum		= PARTICLE_SObjType_WhiteSpark;
-	gNewParticleGroupDef.srcBlend				= GL_SRC_ALPHA;
-	gNewParticleGroupDef.dstBlend				= GL_ONE;
-	pg = NewParticleGroup(&gNewParticleGroupDef);
-	if (pg != -1)
-	{
-		for (i = 0; i < 200; i++)
-		{
-			pt.x = where->x + RandomFloat2() * 60.0f;
-			pt.y = where->y + RandomFloat2() * 60.0f;
-			pt.z = where->z + RandomFloat2() * 60.0f;
-
-			d.y = RandomFloat2() * 500.0f;
-			d.x = RandomFloat2() * 500.0f;
-			d.z = RandomFloat2() * 500.0f;
-
-
-			newParticleDef.groupNum		= pg;
-			newParticleDef.where		= &pt;
-			newParticleDef.delta		= &d;
-			newParticleDef.scale		= RandomFloat() + 1.5f;
-			newParticleDef.rotZ			= 0;
-			newParticleDef.rotDZ		= 0;
-			newParticleDef.alpha		= FULL_ALPHA + (RandomFloat() * .3f);
-			AddParticleToGroup(&newParticleDef);
-		}
-	}
-
-
-
-
-	PlayEffect_Parms3D(EFFECT_BOOM, where, NORMAL_CHANNEL_RATE/2, 4);
+	PlayWeaponExplosionFX(kNetExplosion_Torpedo, where);
 
 
 		/* SEE IF IT HIT ANY CARS */
@@ -1845,7 +1629,7 @@ ObjNode						*newObj;
 
 	newObj->MineArmingTimer = 1.0;							// arming timer
 
-	PlayEffect_Parms3D(EFFECT_MINE, &newObj->Coord, NORMAL_CHANNEL_RATE, 2);
+	PlayEffect_Parms3DSynced(EFFECT_MINE, &newObj->Coord, NORMAL_CHANNEL_RATE, 2);
 	Net_RegisterWeaponObj(newObj, 0);
 
 }
@@ -1893,12 +1677,7 @@ Boolean DoTrig_LandMine(ObjNode *theNode, ObjNode *whoNode, Byte sideBits)
 
 		/* MAKE EXPLOSION */
 
-	MakeSparkExplosion(theNode->Coord.x, theNode->Coord.y+50.0f, theNode->Coord.z,
-						whoNode->Speed2D * .1f, PARTICLE_SObjType_Fire);
-
-	MakeConeBlast(theNode->Coord.x, theNode->Coord.y, theNode->Coord.z);
-
-	PlayEffect_Parms3D(EFFECT_BOOM, &theNode->Coord, NORMAL_CHANNEL_RATE + 0x1000, 4);
+	PlayWeaponExplosionFX(kNetExplosion_LandMine, &theNode->Coord);
 
 
 			/* DELETE THE MINE */
