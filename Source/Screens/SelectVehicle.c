@@ -275,7 +275,11 @@ static Boolean WaitForNetVehicleSelectionsScreen(void)
 	}
 
 	if (!aborted)
+	{
+		gGameView->fadeSound = true;
+		gGameView->fadeOutDuration = .3f;
 		OGL_FadeOutScene(DrawObjects, MoveObjects);
+	}
 
 	DeleteAllObjects();
 	OGL_DisposeGameView();
@@ -443,11 +447,9 @@ Boolean DoVehicleSelectScreen(short whichPlayer, Boolean allowAborting)
 	{
 		gGameView->fadePillarbox = true;
 
-		Boolean isLastLocal = gNetGameInProgress
-			? (gPlayerInfo[whichPlayer].splitPaneNum == gNumLocalPlayers - 1)
-			: (whichPlayer == gNumRealPlayers - 1);
-		if (isLastLocal &&
-			((gGameMode != GAME_MODE_MULTIPLAYERRACE && !IsBattleGameMode(gGameMode)) || gNetGameInProgress))
+		if (!gNetGameInProgress &&
+		    whichPlayer == gNumRealPlayers - 1 &&
+		    (gGameMode != GAME_MODE_MULTIPLAYERRACE && !IsBattleGameMode(gGameMode)))
 		{
 			gGameView->fadeSound = true;
 			gGameView->fadeOutDuration = .3f;
