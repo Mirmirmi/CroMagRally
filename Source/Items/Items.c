@@ -367,7 +367,39 @@ Boolean	isSolid = itemPtr->parm[3] & 1;
 
 		newObj->CType 			= CTYPE_MISC|CTYPE_AVOID;
 		newObj->CBits			= CBITS_ALLSOLID;
-		SetObjectCollisionBounds(newObj, 1000, -10, -50, 50, 50, -50);
+
+		if (gTrackNum == TRACK_NUM_AZTEC)
+		{
+			/* Aztec tree trunks are wider/offset in aztec.bg3d and often sit on sloped
+			   pyramid hills where a fixed bottom=-10 lets downhill cars pass underneath. */
+			const short left   = (short)lroundf(-95.0f * newObj->Scale.x);
+			const short right  = (short)lroundf( 75.0f * newObj->Scale.x);
+			const short front  = (short)lroundf(110.0f * newObj->Scale.z);
+			const short back   = (short)lroundf(-60.0f * newObj->Scale.z);
+			const float pad    = 220.0f;
+			float minY = def.coord.y;
+			float maxY = def.coord.y;
+
+			for (int dx = -1; dx <= 1; dx++)
+			{
+				for (int dz = -1; dz <= 1; dz++)
+				{
+					const float sampleY = GetTerrainY((float)x + (float)dx * pad, (float)z + (float)dz * pad);
+					if (sampleY < minY) minY = sampleY;
+					if (sampleY > maxY) maxY = sampleY;
+				}
+			}
+
+			const float rawBottom = fminf(-100.0f, minY - def.coord.y - 100.0f);
+			const float rawTop    = fmaxf(1000.0f, maxY - def.coord.y + 300.0f);
+			const short bottom    = (short)SDL_clamp((long)floorf(rawBottom), -3000L, -10L);
+			const short top       = (short)SDL_clamp((long)ceilf(rawTop), 1000L, 30000L);
+			SetObjectCollisionBounds(newObj, top, bottom, left, right, front, back);
+		}
+		else
+		{
+			SetObjectCollisionBounds(newObj, 1000, -10, -50, 50, 50, -50);
+		}
 	}
 
 
@@ -1876,25 +1908,48 @@ static void CreateStoneHengeCollisionBoxes(ObjNode *theNode, short type)
 		.nx    = 3,
 	};
 
-	/* Fine Z slicing keeps 45-degree rotated AABB overhang out of the archway so cars
-	   (width 240) pass cleanly through InnerHenge openings while keeping 0 interior gaps. */
-	static const StonePylonSpec innerSpecs[2] =
+	/* Split each InnerHenge pillar into an outer body (nz=24, nx=2) and a fine inner-wall
+	   strip (nz=64, nx=1) inset slightly from the base vertices so the car's axis-aligned
+	   240x240 box at 45/135 degrees clears the archway cleanly with 0 interior gaps. */
+	#define HENGE_INNER_INSET 70.0f
+	#define HENGE_INNER_STRIP 180.0f
+	#define HENGE_INNER_BACK  (HENGE_INNER_INSET + HENGE_INNER_STRIP)
+	#define HENGE_OUTER_EDGE  (HENGE_INNER_BACK - 15.0f)
+	static const StonePylonSpec innerSpecs[4] =
 	{
 		{
-			.verts = {{-2026.3f, -659.5f}, {-251.8f, -681.6f}, {-351.0f, 538.3f}, {-2356.9f, 802.7f}},
+			.verts = {{-2026.3f, -659.5f}, {-251.8f - HENGE_OUTER_EDGE, -681.6f}, {-351.0f - HENGE_OUTER_EDGE, 538.3f}, {-2356.9f, 802.7f}},
 			.minY  = -30.0f,
 			.maxY  = 7430.0f,
 			.nz    = 24,
-			.nx    = 3,
+			.nx    = 2,
 		},
 		{
-			.verts = {{271.7f, -477.7f}, {2277.6f, -742.2f}, {1947.0f, 720.1f}, {172.5f, 742.2f}},
+			.verts = {{-251.8f - HENGE_INNER_BACK, -681.6f}, {-251.8f - HENGE_INNER_INSET, -681.6f}, {-351.0f - HENGE_INNER_INSET, 538.3f}, {-351.0f - HENGE_INNER_BACK, 538.3f}},
+			.minY  = -30.0f,
+			.maxY  = 7430.0f,
+			.nz    = 64,
+			.nx    = 1,
+		},
+		{
+			.verts = {{271.7f + HENGE_INNER_INSET, -477.7f}, {271.7f + HENGE_INNER_BACK, -477.7f}, {172.5f + HENGE_INNER_BACK, 742.2f}, {172.5f + HENGE_INNER_INSET, 742.2f}},
+			.minY  = -30.0f,
+			.maxY  = 7430.0f,
+			.nz    = 64,
+			.nx    = 1,
+		},
+		{
+			.verts = {{271.7f + HENGE_OUTER_EDGE, -477.7f}, {2277.6f, -742.2f}, {1947.0f, 720.1f}, {172.5f + HENGE_OUTER_EDGE, 742.2f}},
 			.minY  = -30.0f,
 			.maxY  = 7430.0f,
 			.nz    = 24,
-			.nx    = 3,
+			.nx    = 2,
 		},
 	};
+	#undef HENGE_OUTER_EDGE
+	#undef HENGE_INNER_BACK
+	#undef HENGE_INNER_STRIP
+	#undef HENGE_INNER_INSET
 
 	static const StonePylonSpec outerSpec =
 	{
@@ -1905,7 +1960,7 @@ static void CreateStoneHengeCollisionBoxes(ObjNode *theNode, short type)
 		.nx    = 6,
 	};
 
-	enum { MAX_HENGE_BOXES = 160 };
+	enum { MAX_HENGE_BOXES = 255 };	/* ObjNode.NumCollisionBoxes is Byte (uint8_t) */
 	CollisionBoxType tempBoxes[MAX_HENGE_BOXES];
 	int count = 0;
 
@@ -1919,8 +1974,8 @@ static void CreateStoneHengeCollisionBoxes(ObjNode *theNode, short type)
 			break;
 
 		case 1: /* inner */
-			count += AppendStonePylonBoxes(theNode, &rotMat, &innerSpecs[0], tempBoxes + count, MAX_HENGE_BOXES - count);
-			count += AppendStonePylonBoxes(theNode, &rotMat, &innerSpecs[1], tempBoxes + count, MAX_HENGE_BOXES - count);
+			for (int i = 0; i < (int)(sizeof(innerSpecs) / sizeof(innerSpecs[0])); i++)
+				count += AppendStonePylonBoxes(theNode, &rotMat, &innerSpecs[i], tempBoxes + count, MAX_HENGE_BOXES - count);
 			break;
 
 		case 2: /* outer */
