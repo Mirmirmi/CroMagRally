@@ -324,6 +324,38 @@ if(EMSCRIPTEN)
 		COMMAND ${CMAKE_COMMAND} -E copy_if_different
 			"${CMAKE_SOURCE_DIR}/packaging/emscripten/index.html"
 			"$<TARGET_FILE_DIR:${GAME_TARGET}>/index.html"
+		COMMAND ${CMAKE_COMMAND} -E make_directory
+			"$<TARGET_FILE_DIR:${GAME_TARGET}>/assets"
+		COMMAND ${CMAKE_COMMAND} -E copy_directory
+			"${CMAKE_SOURCE_DIR}/packaging/emscripten/assets"
+			"$<TARGET_FILE_DIR:${GAME_TARGET}>/assets"
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			"${CMAKE_SOURCE_DIR}/Data/Images/Pillarbox.jpg"
+			"$<TARGET_FILE_DIR:${GAME_TARGET}>/assets/pillarbox.jpg"
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			"${CMAKE_SOURCE_DIR}/Data/Images/MainMenuBackground.jpg"
+			"$<TARGET_FILE_DIR:${GAME_TARGET}>/assets/main-menu-bg.jpg"
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			"${CMAKE_SOURCE_DIR}/packaging/io.jor.cromagrally-alternateicon.png"
+			"$<TARGET_FILE_DIR:${GAME_TARGET}>/assets/cro-mag-emblem.png"
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			"${CMAKE_SOURCE_DIR}/rawdata/sprites/rockfont/#92.FIXW.png"
+			"$<TARGET_FILE_DIR:${GAME_TARGET}>/assets/bone.png"
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			"${CMAKE_SOURCE_DIR}/rawdata/sprites/infobar/#29.png"
+			"$<TARGET_FILE_DIR:${GAME_TARGET}>/assets/bone-plaque.png"
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			"${CMAKE_SOURCE_DIR}/rawdata/sprites/infobar/#10.png"
+			"$<TARGET_FILE_DIR:${GAME_TARGET}>/assets/bone-medallion.png"
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			"${CMAKE_SOURCE_DIR}/rawdata/sprites/infobar/#31.png"
+			"$<TARGET_FILE_DIR:${GAME_TARGET}>/assets/torch-medallion.png"
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			"${CMAKE_SOURCE_DIR}/rawdata/sprites/infobar/#24.png"
+			"$<TARGET_FILE_DIR:${GAME_TARGET}>/assets/arrowhead.png"
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			"${CMAKE_SOURCE_DIR}/rawdata/sprites/infobar/#01.png"
+			"$<TARGET_FILE_DIR:${GAME_TARGET}>/assets/caveman-slate.png"
 		COMMAND ${CMAKE_COMMAND} -E copy_directory
 			"${WEBDATA_DIR}/lazy/Data"
 			"$<TARGET_FILE_DIR:${GAME_TARGET}>/Data")
