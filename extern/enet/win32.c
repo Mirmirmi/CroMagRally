@@ -6,6 +6,7 @@
 
 #define ENET_BUILDING_LIB 1
 #include "enet/enet.h"
+#include <string.h>
 #include <windows.h>
 #include <mmsystem.h>
 #include <ws2tcpip.h>
@@ -328,6 +329,10 @@ enet_socket_send (ENetSocket socket,
     struct sockaddr_in sin;
     DWORD sentLength = 0;
 
+    int relaySent = enet_relay_try_send (address, buffers, bufferCount);
+    if (relaySent >= 0)
+      return relaySent;
+
     if (address != NULL)
     {
         memset (& sin, 0, sizeof (struct sockaddr_in));
@@ -367,38 +372,68 @@ enet_socket_receive (ENetSocket socket,
           recvLength = 0;
     struct sockaddr_in sin;
 
-    if (WSARecvFrom (socket,
-                     (LPWSABUF) buffers,
-                     (DWORD) bufferCount,
-                     & recvLength,
-                     & flags,
-                     address != NULL ? (struct sockaddr *) & sin : NULL,
-                     address != NULL ? & sinLength : NULL,
-                     NULL,
-                     NULL) == SOCKET_ERROR)
+    int relayRecv = enet_relay_try_receive (address, buffers, bufferCount);
+    if (relayRecv != 0)
+      return relayRecv;
+
+    for (int probeIter = 0; probeIter < 16; ++ probeIter)
     {
-       switch (WSAGetLastError ())
-       {
-       case WSAEWOULDBLOCK:
-       case WSAECONNRESET:
-          return 0;
-       case WSAEMSGSIZE:
+        flags = 0;
+        recvLength = 0;
+        sinLength = sizeof (struct sockaddr_in);
+
+        if (WSARecvFrom (socket,
+                         (LPWSABUF) buffers,
+                         (DWORD) bufferCount,
+                         & recvLength,
+                         & flags,
+                         address != NULL ? (struct sockaddr *) & sin : NULL,
+                         address != NULL ? & sinLength : NULL,
+                         NULL,
+                         NULL) == SOCKET_ERROR)
+        {
+           switch (WSAGetLastError ())
+           {
+           case WSAEWOULDBLOCK:
+           case WSAECONNRESET:
+              return 0;
+           case WSAEMSGSIZE:
+              return -2;
+           }
+
+           return -1;
+        }
+
+        if (flags & MSG_PARTIAL)
           return -2;
-       }
 
-       return -1;
+        if (address != NULL && recvLength == 8 && bufferCount >= 1 && buffers[0].data != NULL && buffers[0].dataLength >= 8)
+        {
+            const enet_uint8 * rxBytes = (const enet_uint8 *) buffers[0].data;
+            enet_uint32 magic = 0;
+            memcpy (& magic, rxBytes, 4);
+            if (magic == ENET_HOST_TO_NET_32 (ENET_RELAY_PROBE_MAGIC) &&
+                enet_relay_check_probe_room_code (rxBytes + 4))
+            {
+                enet_uint8 ack[8];
+                enet_uint32 ackMagic = ENET_HOST_TO_NET_32 (ENET_RELAY_ACK_MAGIC);
+                memcpy (ack, & ackMagic, 4);
+                memcpy (ack + 4, rxBytes + 4, 4);
+                sendto (socket, (const char *) ack, sizeof (ack), 0, (struct sockaddr *) & sin, sizeof (sin));
+                continue;
+            }
+        }
+
+        if (address != NULL)
+        {
+            address -> host = (enet_uint32) sin.sin_addr.s_addr;
+            address -> port = ENET_NET_TO_HOST_16 (sin.sin_port);
+        }
+
+        return (int) recvLength;
     }
 
-    if (flags & MSG_PARTIAL)
-      return -2;
-
-    if (address != NULL)
-    {
-        address -> host = (enet_uint32) sin.sin_addr.s_addr;
-        address -> port = ENET_NET_TO_HOST_16 (sin.sin_port);
-    }
-
-    return (int) recvLength;
+    return 0;
 }
 
 int

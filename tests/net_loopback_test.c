@@ -1,7 +1,12 @@
+#include <arpa/inet.h>
+#include <ctype.h>
 #include <math.h>
+#include <netinet/in.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -1452,8 +1457,453 @@ static int TestRefinementsLoopback(void)
 	return 0;
 }
 
+static Boolean PickUnusedTCPPort(uint16_t *outPort)
+{
+	if (!outPort)
+		return false;
+
+	int fd = socket(AF_INET, SOCK_STREAM, 0);
+	if (fd < 0)
+		return false;
+
+	int yes = 1;
+	setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+
+	struct sockaddr_in addr;
+	memset(&addr, 0, sizeof(addr));
+	addr.sin_family = AF_INET;
+	addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+	addr.sin_port = 0;
+
+	if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0)
+	{
+		close(fd);
+		return false;
+	}
+
+	socklen_t addrLen = sizeof(addr);
+	if (getsockname(fd, (struct sockaddr *)&addr, &addrLen) != 0)
+	{
+		close(fd);
+		return false;
+	}
+
+	*outPort = ntohs(addr.sin_port);
+	close(fd);
+	return (*outPort != 0);
+}
+
+static Boolean LocateRoomRelayBinary(char *outPath, size_t outSize)
+{
+	static const char *const kCandidates[] = {
+		"Tools/room_relay/target/release/room_relay",
+		"../Tools/room_relay/target/release/room_relay",
+		"../../Tools/room_relay/target/release/room_relay"
+	};
+
+	for (size_t i = 0; i < sizeof(kCandidates) / sizeof(kCandidates[0]); i++)
+	{
+		if (access(kCandidates[i], X_OK) == 0)
+		{
+			snprintf(outPath, outSize, "%s", kCandidates[i]);
+			return true;
+		}
+	}
+	return false;
+}
+
+static Boolean WaitForRelayHealth(uint16_t relayPort)
+{
+	uint32_t startMs = SDL_GetTicks();
+	while ((SDL_GetTicks() - startMs) < 4000u)
+	{
+		int fd = socket(AF_INET, SOCK_STREAM, 0);
+		if (fd >= 0)
+		{
+			struct sockaddr_in addr;
+			memset(&addr, 0, sizeof(addr));
+			addr.sin_family = AF_INET;
+			addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+			addr.sin_port = htons(relayPort);
+
+			if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == 0)
+			{
+				const char req[] = "GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
+				(void)send(fd, req, sizeof(req) - 1, 0);
+				char resp[256];
+				ssize_t n = recv(fd, resp, sizeof(resp) - 1, 0);
+				close(fd);
+				if (n > 0)
+				{
+					resp[n] = '\0';
+					if (strstr(resp, "200 OK") != NULL)
+						return true;
+				}
+			}
+			else
+			{
+				close(fd);
+			}
+		}
+		SDL_Delay(25);
+	}
+	return false;
+}
+
+static void ResetRelayLoopbackGlobals(void)
+{
+	memset(gPlayerInfo, 0, sizeof(gPlayerInfo));
+	gGameMode = GAME_MODE_MULTIPLAYERRACE;
+	gTheAge = 1;
+	gTrackNum = TRACK_NUM_CHINA;
+	gGamePrefs.difficulty = 1;
+	gGamePrefs.tagDuration = 3;
+	gMultiplayerCPUs = 1;
+	gGameOver = false;
+	gTrackCompleted = false;
+	gNumLocalPlayers = 1;
+	for (int k = 0; k < MAX_LOCAL_PLAYERS; k++)
+		gLocalPlayerNums[k] = (short)k;
+}
+
+static int RunRoomRelayHostChild(uint16_t gamePort, uint16_t discPort, const char *relayUrl, int writeCodeFd, int writePhaseFd)
+{
+	ResetRelayLoopbackGlobals();
+
+	static TerrainItemEntryType dummyHostItems[16];
+	memset(dummyHostItems, 0, sizeof(dummyHostItems));
+	static TerrainItemEntryType *hostItemListPtr = dummyHostItems;
+	gMasterItemList = &hostItemListPtr;
+
+	Net_SetPorts(gamePort, discPort);
+	Net_SetRelayURL(relayUrl);
+	InitNetworkManager();
+
+	TEST_ASSERT(Net_StartHostLobby("RelayHost"), "RelayHost failed to bind lobby");
+
+	char roomCode[8] = "";
+	uint32_t start = SDL_GetTicks();
+	while ((SDL_GetTicks() - start) < 5000u)
+	{
+		Net_PollLobby();
+		if (Net_GetHostRoomCode(roomCode, sizeof(roomCode)) && strlen(roomCode) == 4)
+			break;
+		SDL_Delay(10);
+	}
+	TEST_ASSERT(strlen(roomCode) == 4, "RelayHost failed to obtain 4-char room code");
+
+	ssize_t wroteCode = write(writeCodeFd, roomCode, 4);
+	close(writeCodeFd);
+	TEST_ASSERT(wroteCode == 4, "RelayHost failed to write room code pipe");
+
+	/* Phase A: wait for Direct UDP client join and clean leave */
+	start = SDL_GetTicks();
+	while (Net_GetConnectedPlayerCount() < 2 && (SDL_GetTicks() - start) < 6000u)
+	{
+		Net_PollLobby();
+		SDL_Delay(10);
+	}
+	TEST_ASSERT(Net_GetConnectedPlayerCount() == 2, "RelayHost missed Case A direct UDP client join");
+	const NetLobbyStateMsg *lobbyA = Net_GetLobbyState();
+	TEST_ASSERT(lobbyA && strcmp(lobbyA->players[1].name, "DirectUDPClient") == 0,
+	            "RelayHost Case A client name mismatch");
+
+	start = SDL_GetTicks();
+	while (Net_GetConnectedPlayerCount() > 1 && (SDL_GetTicks() - start) < 6000u)
+	{
+		Net_PollLobby();
+		SDL_Delay(10);
+	}
+	TEST_ASSERT(Net_GetConnectedPlayerCount() == 1, "RelayHost missed Case A clean disconnect");
+
+	char phaseAck = 'A';
+	ssize_t wrotePhase = write(writePhaseFd, &phaseAck, 1);
+	close(writePhaseFd);
+	TEST_ASSERT(wrotePhase == 1, "RelayHost failed to write phase pipe");
+
+	/* Phase B: wait for forced WebSocket relay client join and run match */
+	start = SDL_GetTicks();
+	while (Net_GetConnectedPlayerCount() < 2 && (SDL_GetTicks() - start) < 6000u)
+	{
+		Net_PollLobby();
+		SDL_Delay(10);
+	}
+	TEST_ASSERT(Net_GetConnectedPlayerCount() == 2, "RelayHost missed Case B relay client join");
+	const NetLobbyStateMsg *lobbyB = Net_GetLobbyState();
+	TEST_ASSERT(lobbyB && strcmp(lobbyB->players[1].name, "RelayClient") == 0,
+	            "RelayHost Case B client name mismatch");
+
+	TEST_ASSERT(Net_HostLaunchMatch(), "RelayHost Net_HostLaunchMatch failed");
+
+	gPlayerInfo[0].sex = 1;
+	gPlayerInfo[0].vehicleType = 2;
+	gPlayerInfo[0].skin = 1;
+	gPlayerInfo[0].team = 0;
+	PlayerBroadcastVehicleType();
+
+	TEST_ASSERT(!GetVehicleSelectionFromNetPlayers(), "RelayHost vehicle selection aborted");
+	TEST_ASSERT(gPlayerInfo[1].sex == 0, "RelayHost client sex mismatch");
+	TEST_ASSERT(gPlayerInfo[1].vehicleType == 3, "RelayHost client vehicleType mismatch");
+	TEST_ASSERT(gPlayerInfo[1].skin == 2, "RelayHost client skin mismatch");
+	TEST_ASSERT(gPlayerInfo[1].team == 1, "RelayHost client team mismatch");
+	TEST_ASSERT(!gPlayerInfo[1].isComputer, "RelayHost client should be human before drop");
+
+	gNumTotalPlayers = 2;
+	HostWaitForPlayersToPrepareLevel();
+
+	static ObjNode relayHostCar0, relayHostCar1;
+	memset(&relayHostCar0, 0, sizeof(relayHostCar0));
+	memset(&relayHostCar1, 0, sizeof(relayHostCar1));
+	relayHostCar1.Coord.x = 42.5f;
+	relayHostCar1.Coord.y = 1.0f;
+	relayHostCar1.Coord.z = 84.0f;
+
+	gPlayerInfo[0].objNode = &relayHostCar0;
+	gPlayerInfo[1].objNode = &relayHostCar1;
+	gPlayerInfo[1].health = 0.72f;
+
+	Boolean gotRelayInput = false;
+	const uint32_t expectedHold = (1u << kControlBit_Forward);
+	start = SDL_GetTicks();
+	while ((SDL_GetTicks() - start) < 5000u)
+	{
+		HostReceive_ControlInfoFromClients();
+		if ((gPlayerInfo[1].controlBits & expectedHold) &&
+		    fabsf(gPlayerInfo[1].analogSteering.x - 0.65f) < 0.02f)
+		{
+			gotRelayInput = true;
+		}
+		HostSend_ControlInfoToClients();
+		if (gotRelayInput && gPlayerInfo[1].isComputer)
+			break;
+		SDL_Delay(10);
+	}
+	TEST_ASSERT(gotRelayInput, "RelayHost did not receive client inputs over WebSocket relay");
+	TEST_ASSERT(gPlayerInfo[1].isComputer == true,
+	            "RelayHost did not promote abruptly disconnected relay client to AI");
+
+	ShutdownNetworkManager();
+	return 0;
+}
+
+static int TestRoomCodeAndRelayLoopback(void)
+{
+	char relayBin[256] = "";
+	if (!LocateRoomRelayBinary(relayBin, sizeof(relayBin)))
+	{
+		const char *req = getenv("CROMAG_REQUIRE_RELAY_TEST");
+		if (req && req[0] != '\0' && strcmp(req, "0") != 0)
+		{
+			TEST_ASSERT(false, "Could not locate built release room_relay binary");
+		}
+		printf("SKIP: TestRoomCodeAndRelayLoopback (room_relay binary not built)\n");
+		return 0;
+	}
+
+	uint16_t relayPort = 0;
+	TEST_ASSERT(PickUnusedTCPPort(&relayPort), "Failed to pick ephemeral TCP port for room_relay");
+
+	uint16_t basePort = (uint16_t)(43200 + (getpid() % 400) * 4);
+	uint16_t gamePort = basePort;
+	uint16_t discPort = (uint16_t)(basePort + 1);
+
+	int rc = 1;
+	pid_t relayPid = -1;
+	pid_t hostPid = -1;
+	int codePipe[2] = { -1, -1 };
+	int phasePipe[2] = { -1, -1 };
+
+	#define RELAY_CHECK(cond, msg)                                                           \
+		do                                                                               \
+		{                                                                                \
+			if (!(cond))                                                             \
+			{                                                                        \
+				fprintf(stderr, "FAIL [%s:%d]: %s\n", __FILE__, __LINE__, (msg)); \
+				rc = 1;                                                          \
+				goto cleanup;                                                    \
+			}                                                                        \
+		} while (0)
+
+	relayPid = fork();
+	TEST_ASSERT(relayPid >= 0, "fork() failed for room_relay");
+	if (relayPid == 0)
+	{
+		char bindArg[64];
+		snprintf(bindArg, sizeof(bindArg), "127.0.0.1:%u", (unsigned)relayPort);
+		execl(relayBin, relayBin, "--bind", bindArg, (char *)NULL);
+		_exit(127);
+	}
+
+	RELAY_CHECK(WaitForRelayHealth(relayPort), "room_relay /health endpoint did not respond 200 OK");
+	RELAY_CHECK(pipe(codePipe) == 0, "pipe(codePipe) failed");
+	RELAY_CHECK(pipe(phasePipe) == 0, "pipe(phasePipe) failed");
+
+	char relayUrl[128];
+	snprintf(relayUrl, sizeof(relayUrl), "ws://127.0.0.1:%u/ws", (unsigned)relayPort);
+
+	hostPid = fork();
+	RELAY_CHECK(hostPid >= 0, "fork() failed for RelayHost child");
+	if (hostPid == 0)
+	{
+		close(codePipe[0]);
+		close(phasePipe[0]);
+		int childRc = RunRoomRelayHostChild(gamePort, discPort, relayUrl, codePipe[1], phasePipe[1]);
+		_exit(childRc);
+	}
+
+	close(codePipe[1]);
+	codePipe[1] = -1;
+	close(phasePipe[1]);
+	phasePipe[1] = -1;
+
+	char roomCode[8] = "";
+	ssize_t nCode = read(codePipe[0], roomCode, 4);
+	close(codePipe[0]);
+	codePipe[0] = -1;
+	RELAY_CHECK(nCode == 4, "Parent failed to read 4-char room code from Host");
+	roomCode[4] = '\0';
+	for (int i = 0; i < 4; i++)
+		RELAY_CHECK(isalnum((unsigned char)roomCode[i]), "Room code contains non-alphanumeric byte");
+
+	/* Case A: Direct UDP fast-path via Room Code */
+	ResetRelayLoopbackGlobals();
+	static TerrainItemEntryType dummyClientItems[16];
+	memset(dummyClientItems, 0, sizeof(dummyClientItems));
+	static TerrainItemEntryType *clientItemListPtr = dummyClientItems;
+	gMasterItemList = &clientItemListPtr;
+
+	Net_SetPorts(gamePort, discPort);
+	Net_SetRelayURL(relayUrl);
+	Net_SetForceRelayOnly(false);
+	RELAY_CHECK(Net_ConnectToRoom(roomCode, "DirectUDPClient"), "Case A Net_ConnectToRoom failed");
+	RELAY_CHECK(!Net_IsUsingRelay(), "Case A expected direct UDP fast-path (Net_IsUsingRelay == false)");
+
+	uint32_t start = SDL_GetTicks();
+	while (Net_GetConnectionState(NULL) == kNetConn_Connecting && (SDL_GetTicks() - start) < 5000u)
+	{
+		Net_PollLobby();
+		SDL_Delay(10);
+	}
+	RELAY_CHECK(Net_GetConnectionState(NULL) == kNetConn_Connected, "Case A failed to reach connected lobby");
+	RELAY_CHECK(Net_GetConnectedPlayerCount() == 2, "Case A client expected 2 lobby players");
+	const NetLobbyStateMsg *clientLobbyA = Net_GetLobbyState();
+	RELAY_CHECK(clientLobbyA && strcmp(clientLobbyA->players[0].name, "RelayHost") == 0,
+	            "Case A host name mismatch in lobby");
+
+	Net_DisconnectGracefully();
+	SDL_Delay(40);
+	ShutdownNetworkManager();
+
+	char phaseByte = '\0';
+	ssize_t nPhase = read(phasePipe[0], &phaseByte, 1);
+	close(phasePipe[0]);
+	phasePipe[0] = -1;
+	RELAY_CHECK(nPhase == 1 && phaseByte == 'A', "Failed waiting for Host Phase A cleanup ack");
+
+	/* Case B: Forced WebSocket Relay fallback + full match + abrupt ShutdownNetworkManager() */
+	ResetRelayLoopbackGlobals();
+	gMasterItemList = &clientItemListPtr;
+
+	Net_SetPorts(gamePort, discPort);
+	Net_SetRelayURL(relayUrl);
+	Net_SetForceRelayOnly(true);
+	RELAY_CHECK(Net_ConnectToRoom(roomCode, "RelayClient"), "Case B Net_ConnectToRoom failed");
+	RELAY_CHECK(Net_IsUsingRelay(), "Case B expected WebSocket relay transport (Net_IsUsingRelay == true)");
+
+	start = SDL_GetTicks();
+	while (Net_GetConnectionState(NULL) == kNetConn_Connecting && (SDL_GetTicks() - start) < 5000u)
+	{
+		Net_PollLobby();
+		SDL_Delay(10);
+	}
+	RELAY_CHECK(Net_GetConnectionState(NULL) == kNetConn_Connected, "Case B failed to reach connected lobby");
+	RELAY_CHECK(gMyNetworkPlayerNum == 1, "Case B expected player slot 1");
+
+	start = SDL_GetTicks();
+	while (!Net_ClientHasMatchStarted() && (SDL_GetTicks() - start) < 5000u)
+	{
+		Net_PollLobby();
+		SDL_Delay(10);
+	}
+	RELAY_CHECK(Net_ClientHasMatchStarted(), "Case B client did not receive StartMatch over relay");
+
+	gPlayerInfo[1].sex = 0;
+	gPlayerInfo[1].vehicleType = 3;
+	gPlayerInfo[1].skin = 2;
+	gPlayerInfo[1].team = 1;
+	PlayerBroadcastVehicleType();
+
+	RELAY_CHECK(!GetVehicleSelectionFromNetPlayers(), "Case B client vehicle selection aborted");
+	RELAY_CHECK(gPlayerInfo[0].vehicleType == 2 && gPlayerInfo[0].skin == 1,
+	            "Case B host vehicle mismatch over relay");
+
+	gNumTotalPlayers = 2;
+	ClientTellHostLevelIsPrepared();
+
+	static ObjNode relayClientCar0, relayClientCar1;
+	memset(&relayClientCar0, 0, sizeof(relayClientCar0));
+	memset(&relayClientCar1, 0, sizeof(relayClientCar1));
+	gPlayerInfo[0].objNode = &relayClientCar0;
+	gPlayerInfo[1].objNode = &relayClientCar1;
+
+	gPlayerInfo[1].controlBits = (1u << kControlBit_Forward);
+	gPlayerInfo[1].analogSteering.x = 0.65f;
+
+	Boolean gotRelaySnap = false;
+	start = SDL_GetTicks();
+	while ((SDL_GetTicks() - start) < 5000u)
+	{
+		ClientSend_ControlInfoToHost();
+		ClientReceive_ControlInfoFromHost();
+		Net_ClientUpdateVisualFrame();
+		if (fabsf(gPlayerInfo[1].health - 0.72f) < 0.02f && relayClientCar1.Coord.x > 20.0f)
+		{
+			gotRelaySnap = true;
+			break;
+		}
+		SDL_Delay(15);
+	}
+	RELAY_CHECK(gotRelaySnap, "Case B client did not receive authoritative snapshot over relay");
+
+	/* Abrupt shutdown without Net_DisconnectGracefully() */
+	ShutdownNetworkManager();
+	Net_SetForceRelayOnly(false);
+
+	int hostStatus = 0;
+	RELAY_CHECK(waitpid(hostPid, &hostStatus, 0) == hostPid, "waitpid failed for RelayHost");
+	hostPid = -1;
+	RELAY_CHECK(WIFEXITED(hostStatus) && WEXITSTATUS(hostStatus) == 0,
+	            "RelayHost exited non-zero");
+
+	rc = 0;
+
+cleanup:
+	#undef RELAY_CHECK
+	Net_SetForceRelayOnly(false);
+	Net_SetRelayURL(NULL);
+	ShutdownNetworkManager();
+	if (codePipe[0] >= 0) close(codePipe[0]);
+	if (codePipe[1] >= 0) close(codePipe[1]);
+	if (phasePipe[0] >= 0) close(phasePipe[0]);
+	if (phasePipe[1] >= 0) close(phasePipe[1]);
+	if (hostPid > 0)
+	{
+		kill(hostPid, SIGTERM);
+		waitpid(hostPid, NULL, 0);
+	}
+	if (relayPid > 0)
+	{
+		kill(relayPid, SIGTERM);
+		waitpid(relayPid, NULL, 0);
+	}
+	return rc;
+}
+
 int main(void)
 {
+	/* Keep offline LAN tests isolated from live internet relay TLS initialization prior to fork() */
+	Net_SetRelayURL("");
+
 	if (TestLANValidation() != 0)
 		return 1;
 	printf("PASS: TestLANValidation\n");
@@ -1477,5 +1927,9 @@ int main(void)
 	if (TestRefinementsLoopback() != 0)
 		return 1;
 	printf("PASS: TestRefinementsLoopback\n");
+
+	if (TestRoomCodeAndRelayLoopback() != 0)
+		return 1;
+	printf("PASS: TestRoomCodeAndRelayLoopback\n");
 	return 0;
 }

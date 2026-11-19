@@ -321,6 +321,12 @@ void    ShutdownNetworkManager(void);
 void    EndNetworkGame(void);
 void    Net_SetPorts(uint16_t gamePort, uint16_t discoveryPort);
 void    Net_GetPorts(uint16_t* outGamePort, uint16_t* outDiscoveryPort);
+void    Net_SetRelayURL(const char* wsUrl);
+const char* Net_GetRelayURL(void);
+void    Net_SetForceRelayOnly(Boolean forceRelay);
+Boolean Net_IsUsingRelay(void);
+Boolean Net_GetHostRoomCode(char* outCodeBuf, size_t bufSize);
+int     Net_EnumerateLANCandidates(uint32_t* outNetOrderIPs, int maxOut);
 
 /* LAN utilities */
 Boolean Net_IsLANAddress(uint32_t hostOrderIPv4);
@@ -347,6 +353,7 @@ void    Net_PollDiscovery(void);
 int     Net_GetDiscoveredHosts(NetDiscoveredHostInfo* outHosts, int maxOut);
 
 Boolean Net_ConnectToHost(const char* ipString, uint16_t port, const char* playerName);
+Boolean Net_ConnectToRoom(const char* roomCode, const char* playerName);
 void    Net_PollLobby(void);
 Boolean Net_ClientHasMatchStarted(void);
 void    Net_DisconnectGracefully(void);

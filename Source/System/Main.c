@@ -12,6 +12,7 @@
 #include "game.h"
 #include "miscscreens.h"
 #include "network.h"
+#include "webassets.h"
 #include <SDL3/SDL.h>
 
 
@@ -132,7 +133,9 @@ OSErr		iErr;
 
 	InitDefaultPrefs();
 	LoadPrefs();										// attempt to read from prefs file
+#ifndef __EMSCRIPTEN__
 	SetFullscreenMode(true);
+#endif
 
 	LoadLocalizedStrings(gGamePrefs.language);
 
@@ -155,7 +158,11 @@ void InitDefaultPrefs(void)
 	gGamePrefs.splitScreenMode2P	= SPLITSCREEN_MODE_2P_TALL;
 	gGamePrefs.splitScreenMode3P	= SPLITSCREEN_MODE_3P_TALL;
 	gGamePrefs.displayNumMinus1		= 0;			// main monitor by default
+#ifdef __EMSCRIPTEN__
+	gGamePrefs.fullscreen			= false;
+#else
 	gGamePrefs.fullscreen			= true;
+#endif
 	gGamePrefs.tagDuration 			= 3;
 	gGamePrefs.musicVolumePercent	= 60;			// careful to set these two volumes to one of the
 	gGamePrefs.sfxVolumePercent		= 60;			// the predefined values allowed in the settings menu
@@ -502,9 +509,6 @@ short	placeToWin,startStage;
 			/* NEXT AGE */
 
 		DoAgeConqueredScreen();
-
-
-		canAbort = false;
 	}																		// next age
 
 
@@ -1127,6 +1131,10 @@ static void InitArea(void)
 {
 OGLSetupInputType	viewDef;
 short				numPanes;
+
+#ifdef __EMSCRIPTEN__
+	WebAssets_EnsureTrackLoaded(gTrackNum);
+#endif
 
 
 	switch(gTrackNum)

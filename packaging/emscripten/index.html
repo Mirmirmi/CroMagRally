@@ -1,0 +1,1193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <link rel="icon" type="image/png" href="assets/cro-mag-emblem.png">
+  <link rel="preload" as="image" href="assets/pillarbox.jpg" fetchpriority="high">
+  <link rel="preload" as="image" href="assets/main-menu-bg.jpg" fetchpriority="high">
+  <title>Cro-Mag Rally</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --cavern-deep: #140c06;
+      --stone-border: #4e2f15;
+      --stone-border-dark: #291608;
+      --sand-card: rgba(250, 238, 212, 0.90);
+      --sand-chip: rgba(252, 243, 222, 0.88);
+      --ink-dark: #241508;
+      --ink-muted: #51351c;
+      --ink-light: #fff7e2;
+      --link-ink: #7f2905;
+      --link-hover: #a63708;
+      --play-top: #74ab47;
+      --play-mid: #4e7d2c;
+      --play-bot: #35581b;
+      --play-shadow: #1e350d;
+      --jungle-bg: rgba(229, 239, 211, 0.92);
+      --jungle-border: #497034;
+      --jungle-pill: #2f612d;
+      --jungle-ink: #192b15;
+      --danger: #9e2318;
+      --focus-ring: #ffbe4d;
+    }
+
+    *, *::before, *::after {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      inline-size: 100%;
+      block-size: 100%;
+      background-color: var(--cavern-deep);
+      color: var(--ink-dark);
+      font-family: "Trebuchet MS", "Avenir Next", "Segoe UI", system-ui, -apple-system, sans-serif;
+      line-height: 1.45;
+      overflow-wrap: break-word;
+    }
+
+    h1, h2 {
+      text-wrap: balance;
+    }
+
+    p, li {
+      text-wrap: pretty;
+    }
+
+    .sr-only {
+      position: absolute;
+      inline-size: 1px;
+      block-size: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+
+    a {
+      color: var(--link-ink);
+      font-weight: 700;
+      text-decoration: underline;
+      text-decoration-thickness: 1.5px;
+      text-underline-offset: 3px;
+    }
+
+    a:hover {
+      color: var(--link-hover);
+    }
+
+    a:focus-visible,
+    .play-btn:focus-visible {
+      outline: 3px solid var(--focus-ring);
+      outline-offset: 3px;
+    }
+
+    #stage {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #000;
+    }
+
+    #canvas {
+      display: block;
+      inline-size: 100%;
+      block-size: 100%;
+      min-inline-size: 0;
+      min-block-size: 0;
+      object-fit: contain;
+      outline: none;
+      background: #000;
+    }
+
+    #overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 20;
+      display: flex;
+      justify-content: safe center;
+      align-items: safe center;
+      padding:
+        max(12px, env(safe-area-inset-top, 0px))
+        max(12px, env(safe-area-inset-right, 0px))
+        max(16px, env(safe-area-inset-bottom, 0px))
+        max(12px, env(safe-area-inset-left, 0px));
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      background:
+        radial-gradient(circle at 50% 35%, rgba(242, 123, 29, 0.16) 0%, rgba(16, 9, 4, 0.56) 56%, rgba(8, 4, 2, 0.88) 100%),
+        url("assets/pillarbox.jpg") center / cover no-repeat;
+      transition: opacity 0.35s ease, visibility 0.35s ease;
+    }
+
+    #overlay.hidden {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
+
+    .tablet {
+      position: relative;
+      container: tablet / inline-size;
+      inline-size: min(840px, 100%);
+      margin: auto;
+      border-radius: 16px;
+      border: 5px solid var(--stone-border);
+      outline: 2px solid var(--stone-border-dark);
+      background:
+        linear-gradient(180deg, rgba(255, 244, 220, 0.12) 0%, rgba(78, 47, 21, 0.10) 100%),
+        url("assets/sandstone.jpg") center / cover no-repeat;
+      background-color: #d6ae74;
+      box-shadow:
+        0 28px 70px rgba(0, 0, 0, 0.84),
+        inset 0 2px 0 rgba(255, 240, 206, 0.52),
+        inset 0 -6px 14px rgba(56, 30, 10, 0.36);
+      overflow: clip;
+    }
+
+    .hero-stage {
+      position: relative;
+      padding: clamp(12px, 2cqi, 18px) clamp(16px, 3.5cqi, 34px) 6px;
+      display: grid;
+      justify-items: center;
+    }
+
+    .hero-artwork {
+      position: absolute;
+      inset-block-start: 0;
+      inset-inline: 0;
+      block-size: min(46cqi, 385px);
+      background: url("assets/main-menu-bg.jpg") center top / 100% auto no-repeat;
+      -webkit-mask-image: linear-gradient(to bottom, #000 38%, rgba(0, 0, 0, 0.65) 68%, transparent 100%);
+      mask-image: linear-gradient(to bottom, #000 38%, rgba(0, 0, 0, 0.65) 68%, transparent 100%);
+      pointer-events: none;
+    }
+
+    .version-pill {
+      position: relative;
+      z-index: 2;
+      justify-self: end;
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 12px;
+      border-radius: 999px;
+      background: rgba(34, 19, 8, 0.90);
+      border: 2px solid #d4a66a;
+      color: #fff2cf;
+      font-size: 0.78rem;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      box-shadow: 0 3px 10px rgba(0, 0, 0, 0.45);
+    }
+
+    .hero-copy {
+      position: relative;
+      z-index: 2;
+      margin-block-start: clamp(66px, 19.5cqi, 178px);
+      inline-size: min(620px, 100%);
+      padding: 10px 16px;
+      border-radius: 12px;
+      border: 2px solid rgba(90, 56, 27, 0.65);
+      background: rgba(250, 238, 212, 0.90);
+      box-shadow:
+        0 6px 16px rgba(38, 20, 6, 0.24),
+        inset 0 1px 0 rgba(255, 252, 240, 0.75);
+      text-align: center;
+    }
+
+    .subtitle {
+      margin: 0;
+      font-size: clamp(0.91rem, 0.86rem + 0.25vw, 1.01rem);
+      color: var(--ink-dark);
+      font-weight: 600;
+    }
+
+    .tablet-body {
+      position: relative;
+      z-index: 2;
+      padding: 12px clamp(16px, 3.5cqi, 34px) 18px;
+      display: grid;
+      gap: 16px;
+    }
+
+    .cta-box {
+      display: grid;
+      gap: 14px;
+      justify-items: center;
+    }
+
+    .play-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      inline-size: 100%;
+    }
+
+    .medallion-icon {
+      display: block;
+      inline-size: 48px;
+      block-size: 48px;
+      flex: 0 0 auto;
+      filter: drop-shadow(0 4px 6px rgba(34, 18, 6, 0.45));
+    }
+
+    @media (max-width: 440px) {
+      .medallion-icon {
+        inline-size: 38px;
+        block-size: 38px;
+      }
+    }
+
+    .play-btn {
+      appearance: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-block-size: 54px;
+      min-inline-size: min(260px, 66cqi);
+      padding: 12px 32px;
+      border-radius: 14px;
+      border: 3px solid #243e11;
+      background: linear-gradient(180deg, var(--play-top) 0%, var(--play-mid) 52%, var(--play-bot) 100%);
+      color: var(--ink-light);
+      font-family: "Arial Black", "Trebuchet MS", system-ui, sans-serif;
+      font-size: clamp(1.05rem, 0.95rem + 0.45vw, 1.28rem);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      text-shadow: 0 2px 3px rgba(17, 32, 6, 0.85);
+      box-shadow:
+        0 6px 0 var(--play-shadow),
+        0 12px 24px rgba(24, 15, 4, 0.42),
+        inset 0 2px 0 rgba(212, 245, 168, 0.55);
+      cursor: pointer;
+      transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
+    }
+
+    .play-btn:hover {
+      filter: brightness(1.08);
+      transform: translateY(-1px);
+      box-shadow:
+        0 7px 0 var(--play-shadow),
+        0 16px 28px rgba(24, 15, 4, 0.48),
+        inset 0 2px 0 rgba(212, 245, 168, 0.65);
+    }
+
+    .play-btn:active {
+      transform: translateY(4px);
+      box-shadow:
+        0 2px 0 var(--play-shadow),
+        0 4px 10px rgba(24, 15, 4, 0.3),
+        inset 0 2px 0 rgba(212, 245, 168, 0.4);
+    }
+
+    .controls-strip {
+      inline-size: 100%;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 165px), 1fr));
+      gap: 8px;
+    }
+
+    .control-chip {
+      padding: 8px 11px;
+      border-radius: 10px;
+      border: 2px solid rgba(90, 56, 27, 0.55);
+      background: var(--sand-chip);
+      font-size: 0.84rem;
+      color: var(--ink-dark);
+      text-align: center;
+      box-shadow:
+        0 3px 6px rgba(42, 23, 7, 0.14),
+        inset 0 1px 0 rgba(255, 255, 255, 0.65);
+    }
+
+    .control-chip strong {
+      display: block;
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--ink-muted);
+      margin-block-end: 1px;
+    }
+
+    .controller-note {
+      margin: 0;
+      padding: 4px 12px;
+      border-radius: 999px;
+      background: rgba(250, 238, 212, 0.78);
+      font-size: 0.81rem;
+      color: var(--ink-dark);
+      text-align: center;
+      font-weight: 600;
+    }
+
+    .save-note {
+      margin: 0;
+      max-inline-size: 62ch;
+      padding: 6px 14px;
+      border-radius: 10px;
+      border: 1.5px solid rgba(90, 56, 27, 0.32);
+      background: rgba(250, 238, 212, 0.72);
+      font-size: 0.80rem;
+      line-height: 1.38;
+      color: var(--ink-muted);
+      text-align: center;
+    }
+
+    .save-note strong {
+      color: var(--ink-dark);
+    }
+
+    .desktop-only-notice {
+      display: none;
+      inline-size: min(560px, 100%);
+      gap: 6px;
+      padding: 14px 18px;
+      border-radius: 12px;
+      border: 2.5px solid #8c3f12;
+      background: rgba(252, 240, 214, 0.94);
+      text-align: center;
+      box-shadow:
+        0 6px 14px rgba(38, 20, 6, 0.18),
+        inset 0 1px 0 rgba(255, 255, 255, 0.72);
+    }
+
+    .desktop-only-title {
+      margin: 0;
+      font-family: "Arial Black", "Trebuchet MS", system-ui, sans-serif;
+      font-size: 1rem;
+      color: #6d2807;
+    }
+
+    .desktop-only-body {
+      margin: 0;
+      font-size: 0.88rem;
+      line-height: 1.42;
+      font-weight: 600;
+      color: var(--ink-dark);
+    }
+
+    html.unsupported-device .play-row,
+    html.unsupported-device .controls-strip,
+    html.unsupported-device .controller-note,
+    html.unsupported-device .save-note {
+      display: none;
+    }
+
+    html.unsupported-device .desktop-only-notice {
+      display: grid;
+    }
+
+    @media (max-width: 700px), (max-height: 460px), ((pointer: coarse) and (hover: none)) {
+      .play-row,
+      .controls-strip,
+      .controller-note,
+      .save-note {
+        display: none;
+      }
+
+      .desktop-only-notice {
+        display: grid;
+      }
+    }
+
+    .bone-divider {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      margin-block: -2px;
+    }
+
+    .bone-plaque {
+      display: block;
+      inline-size: clamp(148px, 24cqi, 196px);
+      block-size: auto;
+      aspect-ratio: 4 / 1;
+      filter: drop-shadow(0 3px 5px rgba(34, 18, 6, 0.38));
+    }
+
+    .prop-bone-horiz {
+      display: block;
+      inline-size: 26px;
+      block-size: 52px;
+      transform: rotate(90deg);
+      margin-block: -13px;
+      filter: drop-shadow(0 2px 3px rgba(34, 18, 6, 0.35));
+    }
+
+    .prop-arrowhead-sm {
+      display: block;
+      inline-size: 20px;
+      block-size: 40px;
+      filter: drop-shadow(0 2px 3px rgba(34, 18, 6, 0.35));
+    }
+
+    #progress-section {
+      display: none;
+      inline-size: 100%;
+      max-inline-size: 520px;
+      margin-inline: auto;
+      padding: 12px 16px;
+      border-radius: 12px;
+      background: var(--sand-card);
+      border: 2px solid var(--stone-border);
+      gap: 10px;
+    }
+
+    #progress-section.active {
+      display: grid;
+    }
+
+    .progress-track {
+      inline-size: 100%;
+      block-size: 18px;
+      padding: 2px;
+      border-radius: 999px;
+      border: 2px solid var(--stone-border);
+      background: #422713;
+      box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.55);
+      overflow: clip;
+    }
+
+    #progress-fill {
+      inline-size: 4%;
+      block-size: 100%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, #5d9435 0%, #9cd458 55%, #ffe185 100%);
+      transition: inline-size 0.18s ease-out;
+    }
+
+    #status-text {
+      font-size: 0.94rem;
+      font-weight: 700;
+      color: var(--ink-dark);
+      text-align: center;
+    }
+
+    .highlights-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 275px), 1fr));
+      gap: 14px;
+    }
+
+    .info-card {
+      position: relative;
+      border-radius: 14px;
+      padding: 14px 16px;
+      display: grid;
+      gap: 8px;
+      align-content: start;
+      box-shadow:
+        0 6px 14px rgba(38, 20, 6, 0.22),
+        inset 0 1px 0 rgba(255, 255, 255, 0.65);
+    }
+
+    .info-card.custom-ride {
+      background: var(--jungle-bg);
+      border: 2.5px solid var(--jungle-border);
+      color: var(--jungle-ink);
+    }
+
+    .info-card.paw-guide {
+      background: var(--sand-card);
+      border: 2.5px solid rgba(90, 56, 27, 0.72);
+      color: var(--ink-dark);
+    }
+
+    .card-badge-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .card-pill {
+      display: inline-block;
+      padding: 3px 9px;
+      border-radius: 999px;
+      font-size: 0.7rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .custom-ride .card-pill {
+      background: var(--jungle-pill);
+      color: #f4fae6;
+    }
+
+    .paw-guide .card-pill {
+      background: #6b421f;
+      color: #fff3da;
+    }
+
+    .card-heading {
+      margin: 0;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-family: "Arial Black", "Trebuchet MS", system-ui, sans-serif;
+      font-size: 1.05rem;
+      line-height: 1.2;
+    }
+
+    .lizard-badge {
+      inline-size: 36px;
+      block-size: 36px;
+      flex: 0 0 auto;
+      border-radius: 9px;
+      padding: 4px;
+      background: #2b5e2d;
+      color: #e9f7be;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3);
+    }
+
+    .caveman-badge {
+      display: block;
+      inline-size: 38px;
+      block-size: 38px;
+      flex: 0 0 auto;
+      filter: drop-shadow(0 2px 3px rgba(36, 20, 6, 0.32));
+    }
+
+    .info-card p {
+      margin: 0;
+      font-size: 0.88rem;
+      line-height: 1.42;
+    }
+
+    .steps-list {
+      margin: 2px 0 0;
+      padding-inline-start: 18px;
+      display: grid;
+      gap: 4px;
+      font-size: 0.86rem;
+      line-height: 1.4;
+    }
+
+    .menu-key {
+      display: inline-block;
+      padding: 0 6px;
+      border-radius: 5px;
+      border: 1px solid rgba(90, 56, 27, 0.45);
+      background: #fff9ec;
+      color: #3b220d;
+      font-weight: 800;
+      font-size: 0.8em;
+      letter-spacing: 0.03em;
+      white-space: nowrap;
+    }
+
+    .garage-note {
+      padding: 6px 10px;
+      border-radius: 8px;
+      background: rgba(43, 94, 45, 0.11);
+      border: 1px dashed rgba(43, 94, 45, 0.45);
+      font-size: 0.82rem;
+      font-weight: 700;
+      color: #214a22;
+    }
+
+    .changelog-card {
+      scroll-margin-block-start: 16px;
+      border-radius: 14px;
+      padding: 16px 18px;
+      background: var(--sand-card);
+      border: 2.5px solid rgba(90, 56, 27, 0.72);
+      box-shadow:
+        0 6px 14px rgba(38, 20, 6, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.65);
+      display: grid;
+      gap: 12px;
+    }
+
+    .changelog-header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px 12px;
+      padding-block-end: 8px;
+      border-block-end: 2px dashed rgba(90, 56, 27, 0.28);
+    }
+
+    .changelog-title-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .changelog-header h2 {
+      margin: 0;
+      font-family: "Arial Black", "Trebuchet MS", system-ui, sans-serif;
+      font-size: 1.05rem;
+      color: var(--ink-dark);
+    }
+
+    .changelog-sub {
+      margin: 0;
+      font-size: 0.82rem;
+      color: var(--ink-muted);
+      font-weight: 600;
+    }
+
+    .release-list {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      gap: 10px;
+    }
+
+    .release-item {
+      display: grid;
+      gap: 6px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: rgba(255, 251, 242, 0.76);
+      border: 1.5px solid rgba(90, 56, 27, 0.30);
+    }
+
+    @media (min-width: 640px) {
+      .release-item {
+        grid-template-columns: 82px 1fr;
+        align-items: start;
+        gap: 12px;
+      }
+    }
+
+    .release-ver {
+      justify-self: start;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2px 9px;
+      border-radius: 8px;
+      background: #6b421f;
+      color: #fff3da;
+      font-weight: 800;
+      font-size: 0.8rem;
+      letter-spacing: 0.04em;
+    }
+
+    .release-ver.current {
+      background: var(--play-mid);
+      color: #fffbe8;
+    }
+
+    .release-notes {
+      margin: 0;
+      padding-inline-start: 18px;
+      display: grid;
+      gap: 4px;
+      font-size: 0.85rem;
+      line-height: 1.4;
+      color: var(--ink-dark);
+    }
+
+    .release-notes li strong {
+      color: #361d09;
+    }
+
+    .bone-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding-inline: 6px;
+      padding-block-start: 2px;
+    }
+
+    .bone-cluster {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .prop-bone-tilted-l {
+      display: block;
+      inline-size: 32px;
+      block-size: 64px;
+      transform: rotate(-28deg);
+      filter: drop-shadow(0 4px 6px rgba(32, 16, 4, 0.45));
+    }
+
+    .prop-bone-tilted-r {
+      display: block;
+      inline-size: 32px;
+      block-size: 64px;
+      transform: rotate(34deg);
+      filter: drop-shadow(0 4px 6px rgba(32, 16, 4, 0.45));
+    }
+
+    .prop-bone-horiz-lg {
+      display: block;
+      inline-size: 30px;
+      block-size: 60px;
+      transform: rotate(78deg);
+      margin-block: -14px;
+      filter: drop-shadow(0 4px 6px rgba(32, 16, 4, 0.45));
+    }
+
+    .prop-arrowhead-tilted {
+      display: block;
+      inline-size: 26px;
+      block-size: 52px;
+      transform: rotate(-22deg);
+      filter: drop-shadow(0 4px 6px rgba(32, 16, 4, 0.45));
+    }
+
+    #fatal-banner {
+      position: fixed;
+      inset: 0;
+      z-index: 30;
+      display: none;
+      place-items: center;
+      padding: 24px;
+      background: rgba(16, 9, 4, 0.9);
+    }
+
+    #fatal-banner.visible {
+      display: grid;
+    }
+
+    .fatal-body {
+      padding: 26px 28px;
+      text-align: center;
+      display: grid;
+      gap: 14px;
+      justify-items: center;
+      background: var(--sand-card);
+    }
+
+    .fatal-body h2 {
+      margin: 0;
+      font-family: "Arial Black", "Trebuchet MS", system-ui, sans-serif;
+      font-size: 1.4rem;
+      color: var(--danger);
+    }
+
+    #fatal-message {
+      padding: 12px 14px;
+      inline-size: 100%;
+      border-radius: 10px;
+      background: rgba(158, 35, 24, 0.1);
+      border: 1.5px solid rgba(158, 35, 24, 0.35);
+      color: #4f140e;
+      font-size: 0.94rem;
+      font-weight: 600;
+      word-break: break-word;
+    }
+
+    #alert-toast {
+      position: fixed;
+      inset-block-end: max(20px, env(safe-area-inset-bottom));
+      inset-inline-start: 50%;
+      transform: translateX(-50%);
+      z-index: 40;
+      display: none;
+      max-inline-size: min(520px, 92dvw);
+      padding: 12px 18px;
+      border-radius: 12px;
+      background: #f4e4c5;
+      border: 3px solid var(--stone-border);
+      color: var(--ink-dark);
+      font-size: 0.9rem;
+      font-weight: 700;
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.6);
+    }
+
+    #alert-toast.visible {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div id="stage">
+    <canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
+  </div>
+
+  <main id="overlay" aria-label="Cro-Mag Rally welcome screen">
+    <section class="tablet">
+      <header class="hero-stage">
+        <div class="hero-artwork" aria-hidden="true"></div>
+        <span class="version-pill" aria-label="Current version 5.0.5">v5.0.5</span>
+        <div class="hero-copy">
+          <h1 class="sr-only">Cro-Mag Rally</h1>
+          <p class="subtitle">
+            This is a custom fork of
+            <a href="https://github.com/jorio/CroMagRally" target="_blank" rel="noopener noreferrer">jorio's original Cro-Mag Rally port</a>.
+            See the <a href="#changelog">changelog below</a> for all new additions and base-game bug fixes added in this edition.
+          </p>
+        </div>
+      </header>
+
+      <div class="tablet-body">
+        <div id="gate-section" class="cta-box">
+          <div class="play-row">
+            <img class="medallion-icon" src="assets/torch-medallion.png" alt="" width="64" height="64" decoding="async">
+            <button id="play-btn" class="play-btn" type="button">Start Racing!</button>
+            <img class="medallion-icon" src="assets/bone-medallion.png" alt="" width="64" height="64" decoding="async">
+          </div>
+
+          <div id="desktop-only-notice" class="desktop-only-notice" role="note">
+            <p class="desktop-only-title">Laptop or Desktop Computer Required</p>
+            <p class="desktop-only-body">
+              Cro-Mag Rally needs a laptop or desktop computer with a keyboard or controller and does not work on phones, tablets, or small screens. Open this page on a computer to race!
+            </p>
+          </div>
+
+          <ul class="controls-strip" aria-label="Keyboard controls">
+            <li class="control-chip">
+              <strong>Drive &amp; Steer</strong>
+              Arrow Keys or WASD
+            </li>
+            <li class="control-chip">
+              <strong>Throw Weapon</strong>
+              Spacebar
+            </li>
+            <li class="control-chip">
+              <strong>Menus &amp; Pick</strong>
+              Enter or Spacebar
+            </li>
+            <li class="control-chip">
+              <strong>Back / Pause</strong>
+              Esc
+            </li>
+          </ul>
+          <p class="controller-note">Controllers work too — just plug in and press a button once the race loads.</p>
+          <p class="save-note">
+            <strong>Local Saves:</strong> Progress, settings, and best times are saved right on this device. Clearing your cookies or site data, using a private window, or switching devices will reset your saved progress.
+          </p>
+        </div>
+
+        <div id="progress-section" role="status" aria-live="polite">
+          <div class="progress-track">
+            <div id="progress-fill"></div>
+          </div>
+          <div id="status-text">Rolling boulders to the starting line...</div>
+        </div>
+
+        <div class="bone-divider" aria-hidden="true">
+          <img class="prop-bone-horiz" src="assets/bone.png" alt="" width="32" height="64" decoding="async">
+          <img class="bone-plaque" src="assets/bone-plaque.png" alt="" width="256" height="64" decoding="async">
+          <img class="prop-bone-horiz" src="assets/bone.png" alt="" width="32" height="64" decoding="async">
+        </div>
+
+        <div class="highlights-grid">
+          <article class="info-card custom-ride">
+            <div class="card-badge-row">
+              <span class="card-pill">New Custom Addition</span>
+            </div>
+            <h2 class="card-heading">
+              <svg class="lizard-badge" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+                <path d="M5 22c3-5 7-8 12-8l3-5 4 2-2 4c3 1 5 3 5 6 0 2-2 3-4 3H9c-2 0-3-1-4-2Z" fill="currentColor"/>
+                <circle cx="22.5" cy="12.5" r="1.3" fill="#2b5e2d"/>
+                <path d="M10 24l-2 4M15 24l-1 4M21 24l1 4M25 23l2 4" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+                <path d="M13 14l1-3M16 14l1-3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+              </svg>
+              Meet the Scuttle-Saur!
+            </h2>
+            <p>
+              A brand-new custom lizard ride joins the Stone Age garage! Instead of spinning wheels, this nimble prehistoric reptile scuttles on all four legs—pumping faster as you build up speed.
+            </p>
+            <div class="garage-note">
+              Pick <span class="menu-key">SCUTTLE-SAUR</span> right next to the Turtle Tank on the vehicle screen.
+            </div>
+          </article>
+
+          <article class="info-card paw-guide">
+            <div class="card-badge-row">
+              <span class="card-pill">Lineup Settings</span>
+            </div>
+            <h2 class="card-heading">
+              <img class="caveman-badge" src="assets/caveman-slate.png" alt="" width="128" height="128" decoding="async">
+              Turning Off Paw Patrol
+            </h2>
+            <p>
+              Paw Patrol characters and rescue vehicles start switched on by default. Prefer the original caveman roster?
+            </p>
+            <ol class="steps-list">
+              <li>Open <span class="menu-key">OPTIONS</span> from the main menu.</li>
+              <li>Switch <span class="menu-key">PAW PATROL</span> to <span class="menu-key">OFF</span> to hide all Paw Patrol drivers and vehicles.</li>
+              <li>Want to drive them yourself without computer rivals using them? Leave <span class="menu-key">PAW PATROL</span> on and set <span class="menu-key">CPU PAW PATROL</span> to <span class="menu-key">OFF</span>.</li>
+            </ol>
+          </article>
+        </div>
+
+        <section id="changelog" class="changelog-card" aria-labelledby="changelog-heading">
+          <div class="changelog-header">
+            <div class="changelog-title-group">
+              <img class="prop-arrowhead-sm" src="assets/arrowhead.png" alt="" width="64" height="128" decoding="async">
+              <h2 id="changelog-heading">Customizations &amp; Fixes Changelog</h2>
+            </div>
+            <p class="changelog-sub">New additions and base-game bug fixes built on top of jorio's port</p>
+          </div>
+          <ol class="release-list">
+            <li class="release-item">
+              <span class="release-ver current">v5.0.5</span>
+              <ul class="release-notes">
+                <li><strong>Play on the Web:</strong> Added playable web edition with saved progress and settings remembered locally on your device.</li>
+              </ul>
+            </li>
+            <li class="release-item">
+              <span class="release-ver">v5.0.1</span>
+              <ul class="release-notes">
+                <li><strong>Paw Patrol Characters &amp; Rescue Rides:</strong> Added Chase, Marshall, Skye, Liberty, Rubble, Zuma, and Rocky with matching rescue vehicles, plus <span class="menu-key">PAW PATROL</span> and <span class="menu-key">CPU PAW PATROL</span> toggles in Options.</li>
+                <li><strong>Local Network Multiplayer:</strong> Added hosted network lobbies, direct IP joining, split-screen + network mixing, spectator mode, and all vehicles unlocked in network games.</li>
+                <li><strong>Base-Game Track Obstacle Fix:</strong> Fixed angled and multi-part obstacle collision shapes across tracks so walls and props block karts accurately.</li>
+              </ul>
+            </li>
+            <li class="release-item">
+              <span class="release-ver">v5.0</span>
+              <ul class="release-notes">
+                <li><strong>Battle Arena CPU Rivals:</strong> Added computer opponents to Quest for Fire, Survival, Keep-Away Tag, and Stampede Tag arenas.</li>
+                <li><strong>Scuttle-Saur Upgrade:</strong> Upgraded the Scuttle-Saur with a heavyweight saddle design and fitted driver riding poses.</li>
+                <li><strong>Scandinavia Longboat Collision Fix:</strong> Fixed Viking longboat boundaries in Scandinavia to match the ships' full hull shapes.</li>
+              </ul>
+            </li>
+            <li class="release-item">
+              <span class="release-ver">v4.1</span>
+              <ul class="release-notes">
+                <li><strong>Split-Screen CPU Racers:</strong> Added computer-controlled racers to fill local split-screen races up to 6 drivers, with pre-race CPU and difficulty options.</li>
+              </ul>
+            </li>
+            <li class="release-item">
+              <span class="release-ver">v4.0</span>
+              <ul class="release-notes">
+                <li><strong>New Custom Vehicle — Scuttle-Saur:</strong> Added the four-legged scuttling lizard mount to the Stone Age lineup with speed-synced leg gait and body waddle.</li>
+                <li><strong>Base-Game Gameplay &amp; Physics Fixes:</strong> Fixed pass-through bugs on wandering Vikings and trolls, fixed Stonehenge Druid sticky-tires and suspension powerups not triggering, fixed Goddess lightning and exploding cactus height bugs, reset Atlantis submarine AI state between races, and fixed track fence and animation crashes.</li>
+              </ul>
+            </li>
+          </ol>
+        </section>
+
+        <div class="bone-footer" aria-hidden="true">
+          <div class="bone-cluster">
+            <img class="prop-bone-tilted-l" src="assets/bone.png" alt="" width="32" height="64" decoding="async">
+            <img class="prop-bone-horiz-lg" src="assets/bone.png" alt="" width="32" height="64" decoding="async">
+          </div>
+          <img class="bone-plaque" src="assets/bone-plaque.png" alt="" width="256" height="64" decoding="async">
+          <div class="bone-cluster">
+            <img class="prop-bone-tilted-r" src="assets/bone.png" alt="" width="32" height="64" decoding="async">
+            <img class="prop-arrowhead-tilted" src="assets/arrowhead.png" alt="" width="64" height="128" decoding="async">
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="fatal-banner" role="alertdialog" aria-modal="true" aria-labelledby="fatal-title">
+    <section class="tablet" style="max-inline-size: 460px;">
+      <div class="fatal-body">
+        <span class="card-pill" style="background: var(--danger); color: #fff;">Race Interrupted</span>
+        <h2 id="fatal-title">Unable to Start Cro-Mag Rally</h2>
+        <div id="fatal-message"></div>
+        <button class="play-btn" type="button" onclick="location.reload()">Try Again</button>
+      </div>
+    </section>
+  </div>
+
+  <div id="alert-toast" role="status" aria-live="polite"></div>
+
+  <script>
+    (function () {
+      const canvas = document.getElementById('canvas');
+      const overlay = document.getElementById('overlay');
+      const gateSection = document.getElementById('gate-section');
+      const progressSection = document.getElementById('progress-section');
+      const progressFill = document.getElementById('progress-fill');
+      const statusText = document.getElementById('status-text');
+      const playBtn = document.getElementById('play-btn');
+      const fatalBanner = document.getElementById('fatal-banner');
+      const fatalMessage = document.getElementById('fatal-message');
+      const alertToast = document.getElementById('alert-toast');
+
+      const ua = navigator.userAgent || '';
+      const isIOS = /iPhone|iPad|iPod/i.test(ua) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      const isAndroid = /Android/i.test(ua);
+      if (isIOS || isAndroid) {
+        document.documentElement.classList.add('unsupported-device');
+      }
+
+      try {
+        const rawRoom = new URLSearchParams(window.location.search || '').get('room') || '';
+        const normRoom = rawRoom.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+        if (normRoom.length === 4) {
+          window.__croMagInitialRoomCode = normRoom;
+          playBtn.textContent = 'Join Room ' + normRoom + ' — Start Racing!';
+        }
+      } catch (e) {}
+
+      let started = false;
+      let bootCompleted = false;
+      let totalDeps = 0;
+      let alertTimer = null;
+
+      window.__croMagShowFatal = function (msg) {
+        console.error('Cro-Mag Rally fatal error:', msg);
+        fatalMessage.textContent = String(
+          msg || 'Something unexpected happened on the track. Please reload the page to try again.'
+        );
+        fatalBanner.classList.add('visible');
+        overlay.classList.add('hidden');
+      };
+
+      window.__croMagShowAlert = function (msg) {
+        alertToast.textContent = String(msg || '');
+        alertToast.classList.add('visible');
+        clearTimeout(alertTimer);
+        alertTimer = setTimeout(function () {
+          alertToast.classList.remove('visible');
+        }, 4500);
+      };
+
+      function unlockAudio() {
+        try {
+          const Ctx = window.AudioContext || window.webkitAudioContext;
+          if (!Ctx) return;
+          const ctx = new Ctx();
+          if (ctx.state === 'suspended') {
+            ctx.resume().catch(function () {});
+          }
+          const buf = ctx.createBuffer(1, 1, 22050);
+          const src = ctx.createBufferSource();
+          src.buffer = buf;
+          src.connect(ctx.destination);
+          src.start(0);
+          setTimeout(function () { ctx.close().catch(function () {}); }, 250);
+        } catch (e) {
+          // Non-fatal: the game starts its own sound mixer on first interaction.
+        }
+      }
+
+      function hideOverlayWhenReady() {
+        if (bootCompleted) return;
+        bootCompleted = true;
+        overlay.classList.add('hidden');
+        canvas.focus();
+      }
+
+      function updateProgress(text) {
+        if (!text) {
+          progressFill.style.inlineSize = '100%';
+          statusText.textContent = 'Green flag — starting the race!';
+          return;
+        }
+        const m = text.match(/([^(]+)\((\d+)\/(\d+)\)/);
+        if (m) {
+          const rawLabel = m[1].trim().toLowerCase();
+          const loaded = parseInt(m[2], 10);
+          const total = parseInt(m[3], 10);
+          if (total > 0) {
+            const pct = Math.min(100, Math.max(4, Math.round((loaded / total) * 100)));
+            progressFill.style.inlineSize = pct + '%';
+            if (rawLabel.indexOf('download') !== -1) {
+              statusText.textContent = 'Packing Stone Age tracks... ' + pct + '%';
+            } else {
+              statusText.textContent = 'Lining up racers at the gate... ' + pct + '%';
+            }
+            return;
+          }
+        }
+        if (text.toLowerCase().indexOf('preparing') !== -1) {
+          statusText.textContent = 'Warming up the stone wheels...';
+        } else if (text.toLowerCase().indexOf('running') !== -1) {
+          statusText.textContent = 'Green flag — starting the race!';
+        } else {
+          statusText.textContent = 'Getting the starting line ready...';
+        }
+      }
+
+      const changelogLink = document.querySelector('a[href="#changelog"]');
+      const changelogEl = document.getElementById('changelog');
+      if (changelogLink && changelogEl) {
+        changelogLink.addEventListener('click', function (ev) {
+          ev.preventDefault();
+          changelogEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+      }
+
+      canvas.addEventListener('pointerdown', function () {
+        canvas.focus();
+      });
+
+      playBtn.addEventListener('click', function () {
+        if (started) return;
+        started = true;
+
+        if (!window.WebGL2RenderingContext) {
+          window.__croMagShowFatal('3D graphics support is turned off here. Please enable hardware 3D graphics or try a modern web viewer to play Cro-Mag Rally.');
+          return;
+        }
+
+        unlockAudio();
+        gateSection.style.display = 'none';
+        progressSection.classList.add('active');
+        statusText.textContent = 'Rolling boulders to the starting line...';
+
+        const BUNDLE_VER = '5.0.5-p5';
+
+        window.Module = {
+          canvas: canvas,
+          locateFile: function (path, prefix) {
+            return (prefix || '') + path + (path.indexOf('?') === -1 ? '?v=' + BUNDLE_VER : '');
+          },
+          print: function (text) { console.log(text); },
+          printErr: function (text) { console.error(text); },
+          setStatus: function (text) {
+            updateProgress(text);
+            if (text === '') {
+              hideOverlayWhenReady();
+            }
+          },
+          monitorRunDependencies: function (left) {
+            totalDeps = Math.max(totalDeps, left);
+            if (left > 0 && totalDeps > 0) {
+              const pct = Math.max(4, Math.round(((totalDeps - left) / totalDeps) * 100));
+              progressFill.style.inlineSize = pct + '%';
+            }
+            if (left === 0 && window.Module.calledRun) {
+              hideOverlayWhenReady();
+            }
+          },
+          onRuntimeInitialized: function () {
+            hideOverlayWhenReady();
+          },
+          onAbort: function (what) {
+            console.error('Game abort:', what);
+            window.__croMagShowFatal('The race hit an unexpected boulder! Please reload the page to try again.');
+          }
+        };
+
+        window.onerror = function (msg) {
+          if (!bootCompleted) {
+            console.error('Unhandled startup error:', msg);
+            window.__croMagShowFatal('Something unexpected happened before the race started. Please reload the page to try again.');
+          }
+        };
+
+        const script = document.createElement('script');
+        script.src = 'CroMagRally.js?v=' + BUNDLE_VER;
+        script.async = true;
+        script.onerror = function () {
+          window.__croMagShowFatal('Could not reach the starting line. Check your connection and try reloading the page.');
+        };
+        document.body.appendChild(script);
+      });
+    })();
+  </script>
+</body>
+</html>

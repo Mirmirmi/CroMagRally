@@ -12,3 +12,6 @@ dist/
 # Python
 __pycache__/
 *.pyc
+
+# Rust
+Tools/room_relay/target/

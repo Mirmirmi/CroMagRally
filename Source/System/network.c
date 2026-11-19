@@ -16,16 +16,24 @@
 	#include <arpa/inet.h>
 	#include <fcntl.h>
 	#include <unistd.h>
+#ifndef __EMSCRIPTEN__
 	#include <ifaddrs.h>
+#endif
 	#include <errno.h>
 #endif
 
+#include <ctype.h>
 #include <enet/enet.h>
 #include <math.h>
 #include <string.h>
 
+#ifdef __EMSCRIPTEN__
+	#include <emscripten.h>
+#endif
+
 #include "game.h"
 #include "network.h"
+#include "webassets.h"
 
 /**********************/
 /*     CONSTANTS      */
@@ -79,6 +87,10 @@ static uint32_t     sLastProbeMs = 0;
 
 static NetLobbyConnectionState sConnState = kNetConn_Idle;
 static char                    sStatusText[128] = "";
+static Boolean                 sForceRelayOnly = false;
+static Boolean                 sUsingRelay = false;
+static char                    sHostRoomCode[8] = "";
+static Boolean                 sHostRelayOfflineNoted = false;
 
 static NetLobbyStateMsg        sLobbyState;
 static uint16_t                sMyMachineId = 0;
@@ -135,6 +147,15 @@ static uint32_t NetNowMs(void)
 	return (uint32_t)SDL_GetTicks();
 }
 
+static void Net_SleepMs(uint32_t ms)
+{
+#ifdef __EMSCRIPTEN__
+	emscripten_sleep(ms);
+#else
+	SDL_Delay(ms);
+#endif
+}
+
 static void SafeCopyStr(char* dst, size_t dstSize, const char* src)
 {
 	if (!dst || dstSize == 0)
@@ -147,6 +168,7 @@ static void SafeCopyStr(char* dst, size_t dstSize, const char* src)
 	SDL_strlcpy(dst, src, dstSize);
 }
 
+#ifndef __EMSCRIPTEN__
 static Boolean SetSocketNonBlockingAndBroadcast(NetUDPSocket sock, Boolean enableBroadcast)
 {
 	if (sock == NET_INVALID_SOCKET)
@@ -175,6 +197,7 @@ static Boolean SetSocketNonBlockingAndBroadcast(NetUDPSocket sock, Boolean enabl
 #endif
 	return true;
 }
+#endif
 
 Boolean Net_IsLANAddress(uint32_t hostOrderIPv4)
 {
@@ -220,7 +243,7 @@ void Net_GetLocalIPString(char* outBuf, size_t bufSize)
 
 	SDL_strlcpy(outBuf, "127.0.0.1", bufSize);
 
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
 	struct ifaddrs* ifaddr = NULL;
 	if (getifaddrs(&ifaddr) == 0 && ifaddr != NULL)
 	{
@@ -244,6 +267,7 @@ void Net_GetLocalIPString(char* outBuf, size_t bufSize)
 	}
 #endif
 
+#ifndef __EMSCRIPTEN__
 	/* Fallback UDP getsockname trick (no traffic sent) */
 	NetUDPSocket tmpSock = socket(AF_INET, SOCK_DGRAM, 0);
 	if (tmpSock != NET_INVALID_SOCKET)
@@ -269,6 +293,7 @@ void Net_GetLocalIPString(char* outBuf, size_t bufSize)
 		}
 		NetCloseSocket(tmpSock);
 	}
+#endif
 }
 
 static void SendENetPacket(ENetPeer* peer, uint8_t channel, const void* data, size_t size, enet_uint32 flags)
@@ -377,6 +402,9 @@ static void ApplyLobbyStateToGlobals(void)
 	}
 
 	SyncPlayerNamesFromLobby();
+#ifdef __EMSCRIPTEN__
+	WebAssets_PrefetchTrack(gTrackNum);
+#endif
 }
 
 static void BroadcastLobbyState(void)
@@ -480,6 +508,7 @@ static void PollHostDiscoverySocket(void)
 	}
 }
 
+#ifndef __EMSCRIPTEN__
 static void UpsertDiscoveredHost(uint32_t ipHostOrder, const NetDiscoveryBeaconPacket* beacon)
 {
 	if (!Net_IsLANAddress(ipHostOrder))
@@ -523,6 +552,7 @@ static void UpsertDiscoveredHost(uint32_t ipHostOrder, const NetDiscoveryBeaconP
 	entry->lastSeenMs = now;
 	SafeCopyStr(entry->hostName, sizeof(entry->hostName), beacon->hostName);
 }
+#endif
 
 static void HandleJoinRequest(ENetPeer* peer, const NetJoinRequestMsg* req)
 {
@@ -1321,6 +1351,9 @@ void InitNetworkManager(void)
 	gIsNetworkHost = false;
 	gIsNetworkClient = false;
 	gNetGameInProgress = false;
+	sUsingRelay = false;
+	sHostRoomCode[0] = '\0';
+	sHostRelayOfflineNoted = false;
 	sConnState = kNetConn_Idle;
 	sStatusText[0] = '\0';
 	sLobbyState.msgType = kNetMsgLobbyState;
@@ -1429,9 +1462,14 @@ void ShutdownNetworkManager(void)
 		sHost = NULL;
 	}
 
+	enet_relay_shutdown();
+
 	gNetGameInProgress = false;
 	gIsNetworkHost = false;
 	gIsNetworkClient = false;
+	sUsingRelay = false;
+	sHostRoomCode[0] = '\0';
+	sHostRelayOfflineNoted = false;
 	gMyNetworkPlayerNum = 0;
 	for (int k = 0; k < MAX_LOCAL_PLAYERS; k++)
 		gLocalPlayerNums[k] = (short)k;
@@ -1444,6 +1482,25 @@ void ShutdownNetworkManager(void)
 	sStatusText[0] = '\0';
 	memset(&sLobbyState, 0, sizeof(sLobbyState));
 	Net_ResetGameSyncState();
+}
+
+static void UpdateHostRoomCodeStatusText(Boolean relayOffline)
+{
+#ifdef __EMSCRIPTEN__
+	if (relayOffline)
+		SafeCopyStr(sStatusText, sizeof(sStatusText), "RELAY OFFLINE");
+	else if (sHostRoomCode[0] != '\0')
+		SafeCopyStr(sStatusText, sizeof(sStatusText), "SHARE ROOM CODE TO JOIN");
+	else
+		SafeCopyStr(sStatusText, sizeof(sStatusText), "CONNECTING TO RELAY...");
+#else
+	char localIP[32];
+	Net_GetLocalIPString(localIP, sizeof(localIP));
+	if (relayOffline)
+		SDL_snprintf(sStatusText, sizeof(sStatusText), "LAN %s:%u (OFFLINE)", localIP, (unsigned)sGamePort);
+	else
+		SDL_snprintf(sStatusText, sizeof(sStatusText), "LAN %s:%u", localIP, (unsigned)sGamePort);
+#endif
 }
 
 Boolean Net_StartHostLobby(const char* hostName)
@@ -1474,6 +1531,7 @@ Boolean Net_StartHostLobby(const char* hostName)
 		return false;
 	}
 
+#ifndef __EMSCRIPTEN__
 	/* Bind UDP discovery listener socket on sDiscoveryPort */
 	sHostDiscoverySock = socket(AF_INET, SOCK_DGRAM, 0);
 	if (sHostDiscoverySock != NET_INVALID_SOCKET)
@@ -1490,6 +1548,7 @@ Boolean Net_StartHostLobby(const char* hostName)
 			sHostDiscoverySock = NET_INVALID_SOCKET;
 		}
 	}
+#endif
 
 	gIsNetworkHost = true;
 	gIsNetworkClient = false;
@@ -1531,9 +1590,35 @@ Boolean Net_StartHostLobby(const char* hostName)
 	gNumRealPlayers = savedLocalPlayers;
 	SyncPlayerNamesFromLobby();
 
-	char localIP[32];
-	Net_GetLocalIPString(localIP, sizeof(localIP));
-	SDL_snprintf(sStatusText, sizeof(sStatusText), "HOSTING AT %s:%u", localIP, (unsigned)sGamePort);
+	sHostRoomCode[0] = '\0';
+	sHostRelayOfflineNoted = false;
+#ifdef __EMSCRIPTEN__
+	sUsingRelay = true;
+	if (enet_relay_host_start(NULL, 0) != 0)
+	{
+		enet_host_destroy(sHost);
+		sHost = NULL;
+		gIsNetworkHost = false;
+		gNetGameInProgress = false;
+		sUsingRelay = false;
+		sConnState = kNetConn_Failed;
+		SafeCopyStr(sStatusText, sizeof(sStatusText), "RELAY UNREACHABLE");
+		return false;
+	}
+	WebAssets_PrefetchTrack(gTrackNum);
+#else
+	ENetRelayLanCandidate candidates[ENET_RELAY_MAX_CANDIDATES];
+	uint32_t candIPs[ENET_RELAY_MAX_CANDIDATES];
+	int candCount = Net_EnumerateLANCandidates(candIPs, ENET_RELAY_MAX_CANDIDATES);
+	for (int i = 0; i < candCount; i++)
+	{
+		candidates[i].ipv4NetworkOrder = candIPs[i];
+		candidates[i].portHostOrder = sGamePort;
+	}
+	enet_relay_host_start(candidates, (size_t)candCount);
+#endif
+
+	UpdateHostRoomCodeStatusText(false);
 	return true;
 }
 
@@ -1547,6 +1632,9 @@ void Net_SyncHostLobbySettings(void)
 	if (gIsNetworkHost && sHost)
 	{
 		BroadcastLobbyState();
+#ifdef __EMSCRIPTEN__
+		WebAssets_PrefetchTrack(gTrackNum);
+#endif
 	}
 }
 
@@ -1664,6 +1752,115 @@ int Net_GetConnectedPlayerCount(void)
 	return count;
 }
 
+int Net_EnumerateLANCandidates(uint32_t* outNetOrderIPs, int maxOut)
+{
+	if (!outNetOrderIPs || maxOut <= 0)
+		return 0;
+
+	int count = 0;
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+	struct ifaddrs* ifaddr = NULL;
+	if (getifaddrs(&ifaddr) == 0 && ifaddr != NULL)
+	{
+		for (struct ifaddrs* ifa = ifaddr; ifa != NULL && count < maxOut; ifa = ifa->ifa_next)
+		{
+			if (!ifa->ifa_addr || ifa->ifa_addr->sa_family != AF_INET)
+				continue;
+			const struct sockaddr_in* sa = (const struct sockaddr_in*)ifa->ifa_addr;
+			uint32_t netIP = (uint32_t)sa->sin_addr.s_addr;
+			uint32_t hostIP = ntohl(netIP);
+			if ((hostIP >> 24) == 127 || !Net_IsLANAddress(hostIP))
+				continue;
+
+			Boolean dup = false;
+			for (int k = 0; k < count; k++)
+			{
+				if (outNetOrderIPs[k] == netIP)
+				{
+					dup = true;
+					break;
+				}
+			}
+			if (!dup)
+				outNetOrderIPs[count++] = netIP;
+		}
+		freeifaddrs(ifaddr);
+	}
+#endif
+
+#ifndef __EMSCRIPTEN__
+	if (count == 0)
+	{
+		char localIP[32];
+		Net_GetLocalIPString(localIP, sizeof(localIP));
+		uint32_t parsedHost = 0;
+		if (Net_ParseLANIPString(localIP, &parsedHost) && (parsedHost >> 24) != 127)
+		{
+			outNetOrderIPs[count++] = htonl(parsedHost);
+		}
+	}
+	if (count < maxOut)
+	{
+		uint32_t loopbackNet = htonl(0x7F000001u);
+		Boolean hasLoopback = false;
+		for (int k = 0; k < count; k++)
+		{
+			if (outNetOrderIPs[k] == loopbackNet)
+			{
+				hasLoopback = true;
+				break;
+			}
+		}
+		if (!hasLoopback)
+			outNetOrderIPs[count++] = loopbackNet;
+	}
+#endif
+	return count;
+}
+
+void Net_SetRelayURL(const char* wsUrl)
+{
+	enet_relay_set_url(wsUrl);
+}
+
+const char* Net_GetRelayURL(void)
+{
+	return enet_relay_get_url();
+}
+
+void Net_SetForceRelayOnly(Boolean forceRelay)
+{
+	sForceRelayOnly = forceRelay ? true : false;
+}
+
+Boolean Net_IsUsingRelay(void)
+{
+	return sUsingRelay;
+}
+
+Boolean Net_GetHostRoomCode(char* outCodeBuf, size_t bufSize)
+{
+	if (!gIsNetworkHost)
+		return false;
+
+	if (sHostRoomCode[0] == '\0')
+	{
+		char code[8] = "";
+		if (enet_relay_host_get_room_code(code, sizeof(code)) == 1 && code[0] != '\0')
+		{
+			SafeCopyStr(sHostRoomCode, sizeof(sHostRoomCode), code);
+			enet_relay_set_active_room_code(sHostRoomCode);
+			UpdateHostRoomCodeStatusText(false);
+		}
+	}
+	if (sHostRoomCode[0] == '\0')
+		return false;
+
+	if (outCodeBuf && bufSize > 0)
+		SafeCopyStr(outCodeBuf, bufSize, sHostRoomCode);
+	return true;
+}
+
 const NetLobbyStateMsg* Net_GetLobbyState(void)
 {
 	return &sLobbyState;
@@ -1678,6 +1875,9 @@ NetLobbyConnectionState Net_GetConnectionState(const char** outStatusText)
 
 Boolean Net_StartClientDiscovery(void)
 {
+#ifdef __EMSCRIPTEN__
+	return false;
+#else
 	Net_StopClientDiscovery();
 	sNumDiscoveredHosts = 0;
 	memset(sDiscoveredHosts, 0, sizeof(sDiscoveredHosts));
@@ -1704,6 +1904,7 @@ Boolean Net_StartClientDiscovery(void)
 	sLastProbeMs = 0;
 	Net_PollDiscovery();
 	return true;
+#endif
 }
 
 void Net_StopClientDiscovery(void)
@@ -1717,6 +1918,9 @@ void Net_StopClientDiscovery(void)
 
 void Net_PollDiscovery(void)
 {
+#ifdef __EMSCRIPTEN__
+	return;
+#else
 	if (sClientDiscoverySock == NET_INVALID_SOCKET)
 		return;
 
@@ -1772,6 +1976,7 @@ void Net_PollDiscovery(void)
 		}
 	}
 	sNumDiscoveredHosts = writeIdx;
+#endif
 }
 
 int Net_GetDiscoveredHosts(NetDiscoveredHostInfo* outHosts, int maxOut)
@@ -1786,6 +1991,14 @@ static char sPendingClientName[NET_MAX_NAME_LEN] = "PLAYER";
 
 Boolean Net_ConnectToHost(const char* ipString, uint16_t port, const char* playerName)
 {
+#ifdef __EMSCRIPTEN__
+	(void)ipString;
+	(void)port;
+	(void)playerName;
+	sConnState = kNetConn_Failed;
+	SafeCopyStr(sStatusText, sizeof(sStatusText), "USE ROOM CODE IN BROWSER");
+	return false;
+#else
 	ShutdownNetworkManager();
 	InitNetworkManager();
 
@@ -1829,17 +2042,293 @@ Boolean Net_ConnectToHost(const char* ipString, uint16_t port, const char* playe
 	gIsNetworkHost = false;
 	gIsNetworkClient = true;
 	gNetGameInProgress = true;
+	sUsingRelay = false;
 	sClientMatchStarted = false;
 	sClientLevelGo = false;
 	sConnState = kNetConn_Connecting;
 	SDL_snprintf(sStatusText, sizeof(sStatusText), "CONNECTING TO %s...", ipString);
+	return true;
+#endif
+}
+
+Boolean Net_ConnectToRoom(const char* roomCode, const char* playerName)
+{
+	char normCode[5];
+	int codeLen = 0;
+	Boolean invalidCode = false;
+	if (roomCode)
+	{
+		const char* p = roomCode;
+		while (*p == ' ' || *p == '\t')
+			p++;
+		while (*p != '\0' && *p != ' ' && *p != '\t')
+		{
+			unsigned char ch = (unsigned char)*p++;
+			if (!isalnum(ch) || codeLen >= 4)
+			{
+				invalidCode = true;
+				break;
+			}
+			normCode[codeLen++] = (char)toupper(ch);
+		}
+		while (*p == ' ' || *p == '\t')
+			p++;
+		if (*p != '\0')
+			invalidCode = true;
+	}
+	normCode[codeLen] = '\0';
+
+	if (invalidCode || codeLen != 4)
+	{
+		sConnState = kNetConn_Failed;
+		SafeCopyStr(sStatusText, sizeof(sStatusText), "ENTER 4-CHAR ROOM CODE");
+		return false;
+	}
+
+	char savedPlayerName[NET_MAX_NAME_LEN];
+	SafeCopyStr(savedPlayerName, sizeof(savedPlayerName),
+	            (playerName && playerName[0]) ? playerName : "PLAYER");
+
+	ShutdownNetworkManager();
+	InitNetworkManager();
+
+	if (!sENetInitialized)
+		return false;
+
+	if (enet_relay_client_join(normCode) != 0)
+	{
+		sConnState = kNetConn_Failed;
+		SafeCopyStr(sStatusText, sizeof(sStatusText), "RELAY UNREACHABLE");
+		return false;
+	}
+
+	uint8_t clientId = 0;
+	ENetRelayLanCandidate cands[ENET_RELAY_MAX_CANDIDATES];
+	size_t candCount = 0;
+	int rejectReason = 0;
+	int pollRes = 0;
+	uint32_t joinStartMs = NetNowMs();
+
+	while (true)
+	{
+		DoSDLMaintenance();
+		pollRes = enet_relay_client_poll_join(&clientId, cands, ENET_RELAY_MAX_CANDIDATES, &candCount, &rejectReason);
+		if (pollRes != 0)
+			break;
+		if ((NetNowMs() - joinStartMs) >= 4000u)
+		{
+			enet_relay_shutdown();
+			sConnState = kNetConn_Failed;
+			SafeCopyStr(sStatusText, sizeof(sStatusText), "RELAY TIMEOUT");
+			return false;
+		}
+		Net_SleepMs(10);
+	}
+
+	if (pollRes < 0)
+	{
+		enet_relay_shutdown();
+		sConnState = kNetConn_Failed;
+		if (rejectReason == 1)
+			SafeCopyStr(sStatusText, sizeof(sStatusText), "ROOM NOT FOUND");
+		else if (rejectReason == 2)
+			SafeCopyStr(sStatusText, sizeof(sStatusText), "ROOM IS FULL");
+		else if (rejectReason == 3)
+			SafeCopyStr(sStatusText, sizeof(sStatusText), "VERSION MISMATCH");
+		else
+			SafeCopyStr(sStatusText, sizeof(sStatusText), "RELAY UNREACHABLE");
+		return false;
+	}
+
+#ifndef __EMSCRIPTEN__
+	if (!sForceRelayOnly && candCount > 0)
+	{
+		NetUDPSocket probeSock = socket(AF_INET, SOCK_DGRAM, 0);
+		if (probeSock != NET_INVALID_SOCKET)
+		{
+			SetSocketNonBlockingAndBroadcast(probeSock, false);
+			uint8_t probePkt[8];
+			uint32_t probeMagic = htonl(ENET_RELAY_PROBE_MAGIC);
+			memcpy(probePkt, &probeMagic, 4);
+			memcpy(probePkt + 4, normCode, 4);
+
+			uint32_t probeStartMs = NetNowMs();
+			int sendWave = 0;
+			char winnerIP[32] = "";
+			uint16_t winnerPort = 0;
+			Boolean foundDirect = false;
+
+			while (!foundDirect)
+			{
+				uint32_t nowMs = NetNowMs();
+				uint32_t elapsed = nowMs - probeStartMs;
+				if (elapsed >= 180u)
+					break;
+
+				if ((sendWave == 0) || (sendWave == 1 && elapsed >= 60u))
+				{
+					for (size_t i = 0; i < candCount; i++)
+					{
+						struct sockaddr_in dst;
+						memset(&dst, 0, sizeof(dst));
+						dst.sin_family = AF_INET;
+						dst.sin_port = htons(cands[i].portHostOrder ? cands[i].portHostOrder : sGamePort);
+						dst.sin_addr.s_addr = cands[i].ipv4NetworkOrder;
+						sendto(probeSock, (const char*)probePkt, sizeof(probePkt), 0,
+						       (struct sockaddr*)&dst, sizeof(dst));
+					}
+					sendWave++;
+				}
+
+				for (int iter = 0; iter < 16; iter++)
+				{
+					uint8_t rxBuf[32];
+					struct sockaddr_in fromAddr;
+					socklen_t fromLen = sizeof(fromAddr);
+					int rxLen = (int)recvfrom(probeSock, (char*)rxBuf, sizeof(rxBuf), 0,
+					                          (struct sockaddr*)&fromAddr, &fromLen);
+					if (rxLen <= 0)
+						break;
+					if (rxLen == 8)
+					{
+						uint32_t ackMagic = 0;
+						memcpy(&ackMagic, rxBuf, 4);
+						if (ackMagic == htonl(ENET_RELAY_ACK_MAGIC) &&
+						    memcmp(rxBuf + 4, normCode, 4) == 0)
+						{
+							uint32_t fromIPHost = ntohl(fromAddr.sin_addr.s_addr);
+							if (Net_IsLANAddress(fromIPHost))
+							{
+								inet_ntop(AF_INET, &fromAddr.sin_addr, winnerIP, sizeof(winnerIP));
+								winnerPort = ntohs(fromAddr.sin_port);
+								foundDirect = true;
+								break;
+							}
+						}
+					}
+				}
+
+				if (!foundDirect)
+					Net_SleepMs(10);
+			}
+
+			NetCloseSocket(probeSock);
+
+			if (foundDirect && winnerIP[0] != '\0')
+			{
+				enet_relay_shutdown();
+				sUsingRelay = false;
+				return Net_ConnectToHost(winnerIP, winnerPort, savedPlayerName);
+			}
+		}
+	}
+#endif
+
+	sHost = enet_host_create(NULL, 1, NET_NUM_CHANNELS, 0, 0);
+	if (!sHost)
+	{
+		enet_relay_shutdown();
+		sConnState = kNetConn_Failed;
+		SafeCopyStr(sStatusText, sizeof(sStatusText), "FAILED TO CREATE CLIENT");
+		return false;
+	}
+
+	ENetAddress address;
+	address.host = htonl(ENET_RELAY_SYNTHETIC_HOST_IP);
+	address.port = NET_DEFAULT_PORT;
+
+	sServerPeer = enet_host_connect(sHost, &address, NET_NUM_CHANNELS, 0);
+	if (!sServerPeer)
+	{
+		enet_host_destroy(sHost);
+		sHost = NULL;
+		enet_relay_shutdown();
+		sConnState = kNetConn_Failed;
+		SafeCopyStr(sStatusText, sizeof(sStatusText), "CONNECT FAILED");
+		return false;
+	}
+	enet_peer_timeout(sServerPeer, 32, 15000, 45000);
+
+	SafeCopyStr(sPendingClientName, sizeof(sPendingClientName), savedPlayerName);
+	sUsingRelay = true;
+	gIsNetworkHost = false;
+	gIsNetworkClient = true;
+	gNetGameInProgress = true;
+	sClientMatchStarted = false;
+	sClientLevelGo = false;
+	sConnState = kNetConn_Connecting;
+	SDL_snprintf(sStatusText, sizeof(sStatusText), "CONNECTING TO ROOM %s...", normCode);
 	return true;
 }
 
 void Net_PollLobby(void)
 {
 	if (gIsNetworkHost)
+	{
 		PollHostDiscoverySocket();
+		enet_relay_host_poll();
+
+		char roomCode[8] = "";
+		int rc = enet_relay_host_get_room_code(roomCode, sizeof(roomCode));
+		if (rc == 1 && sHostRoomCode[0] == '\0')
+		{
+			SafeCopyStr(sHostRoomCode, sizeof(sHostRoomCode), roomCode);
+			enet_relay_set_active_room_code(sHostRoomCode);
+			UpdateHostRoomCodeStatusText(false);
+		}
+		else if (rc < 0 && !sHostRelayOfflineNoted)
+		{
+			sHostRelayOfflineNoted = true;
+			sHostRoomCode[0] = '\0';
+			enet_relay_set_active_room_code(NULL);
+			UpdateHostRoomCodeStatusText(true);
+#ifdef __EMSCRIPTEN__
+			if (sHost)
+			{
+				for (size_t p = 0; p < sHost->peerCount; p++)
+				{
+					ENetPeer* peer = &sHost->peers[p];
+					if (peer->state != ENET_PEER_STATE_DISCONNECTED)
+					{
+						HandlePeerDisconnectOnHost(peer);
+						enet_peer_reset(peer);
+					}
+				}
+			}
+#endif
+		}
+
+		uint8_t discClientId = 0;
+		while (enet_relay_host_pop_disconnected_client(&discClientId))
+		{
+			if (sHost && discClientId >= 1 && discClientId <= 7)
+			{
+				uint32_t expectedIP = ENET_RELAY_SYNTHETIC_CLIENT_BASE | (uint32_t)discClientId;
+				for (size_t p = 0; p < sHost->peerCount; p++)
+				{
+					ENetPeer* peer = &sHost->peers[p];
+					if (peer->state != ENET_PEER_STATE_DISCONNECTED &&
+					    ntohl(peer->address.host) == expectedIP)
+					{
+						HandlePeerDisconnectOnHost(peer);
+						enet_peer_reset(peer);
+					}
+				}
+			}
+		}
+	}
+
+	if (gIsNetworkClient && sUsingRelay && sServerPeer != NULL && !enet_relay_client_is_connected())
+	{
+		sServerPeer = NULL;
+		sConnState = kNetConn_Disconnected;
+		SafeCopyStr(sStatusText, sizeof(sStatusText), "DISCONNECTED FROM HOST");
+		if (sLobbyState.matchStarted)
+		{
+			sMatchLost = true;
+			gGameOver = true;
+		}
+	}
 
 	if (!sHost)
 		return;
@@ -2035,7 +2524,7 @@ Boolean GetVehicleSelectionFromNetPlayers(void)
 			return true;
 		}
 
-		SDL_Delay(10);
+		Net_SleepMs(10);
 	}
 }
 
@@ -2073,11 +2562,11 @@ void HostWaitForPlayersToPrepareLevel(void)
 		if (allPrepared)
 			break;
 
-		/* Safety timeout (15s) so dropped silent peer doesn't wedge host forever */
-		if ((NetNowMs() - startMs) > 15000u)
+		/* Safety timeout (30s) so dropped silent peer doesn't wedge host forever */
+		if ((NetNowMs() - startMs) > 30000u)
 			break;
 
-		SDL_Delay(5);
+		Net_SleepMs(5);
 	}
 
 	NetMatchGoMsg go;
@@ -2108,10 +2597,10 @@ void ClientTellHostLevelIsPrepared(void)
 		DoSDLMaintenance();
 		Net_PollLobby();
 
-		if ((NetNowMs() - startMs) > 15000u)
+		if ((NetNowMs() - startMs) > 30000u)
 			break;
 
-		SDL_Delay(5);
+		Net_SleepMs(5);
 	}
 
 	if (gGameMode == GAME_MODE_TAG1 || gGameMode == GAME_MODE_TAG2)

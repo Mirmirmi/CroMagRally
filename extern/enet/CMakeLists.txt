@@ -8,11 +8,13 @@ include(CheckTypeSize)
 set(ENET_SOURCES
     callbacks.c
     compress.c
+    emscripten.c
     host.c
     list.c
     packet.c
     peer.c
     protocol.c
+    relay.c
     unix.c
     win32.c
 )
@@ -22,6 +24,10 @@ add_library(enet STATIC ${ENET_SOURCES})
 target_include_directories(enet PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
 )
+
+if(APPLE)
+    target_link_libraries(enet PUBLIC "-framework Security" "-framework CoreFoundation")
+endif()
 
 if(WIN32)
     target_link_libraries(enet PUBLIC ws2_32 winmm)

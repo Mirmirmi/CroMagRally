@@ -1,0 +1,11 @@
+[package]
+name = "room_relay"
+version = "0.1.0"
+edition = "2021"
+description = "Stateless WebSocket room relay for Cro-Mag Rally internet multiplayer"
+
+[dependencies]
+futures-util = "0.3"
+rand = "0.8"
+tokio = { version = "1.40", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal", "io-util"] }
+tokio-tungstenite = "0.24"

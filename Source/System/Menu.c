@@ -9,7 +9,9 @@
 #include "game.h"
 #include "menu.h"
 
+#ifndef __EMSCRIPTEN__
 #include <SDL3/SDL_opengl.h>
+#endif
 #include <math.h>
 
 #define DECLARE_WORKBUF(buf, bufSize) char (buf)[256]; const int (bufSize) = 256
@@ -262,6 +264,11 @@ void KillMenu(int returnCode)
 		gNav->menuPick = returnCode;
 		gNav->menuState = kMenuStateFadeOut;
 	}
+}
+
+Boolean IsMenuEditingText(void)
+{
+	return (gNav != NULL && gNav->menuState == kMenuStateEditingText);
 }
 
 static void SetStandardMouseCursor(void)
@@ -1415,6 +1422,53 @@ static void FormatIPSectionPreview(char* out, int outSize)
 	SDL_snprintf(out, (size_t)outSize, "%s.%s.%s.%s", parts[0], parts[1], parts[2], parts[3]);
 }
 
+static void PositionTextInputPair(int row)
+{
+	ObjNode* label = gNav->menuObjects[row];
+	if (!label)
+		return;
+	ObjNode* valObj = GetNthChainedNode(label, 1, NULL);
+	if (!valObj)
+		return;
+
+	float baseScale = GetMenuItemHeight(row) * gNav->style.standardScale;
+	label->Scale = (OGLVector3D) { baseScale, baseScale, baseScale };
+	valObj->Scale = (OGLVector3D) { baseScale, baseScale, baseScale };
+
+	OGLRect valExt = TextMesh_GetExtents(valObj);
+	float valW = valExt.right - valExt.left;
+	if (valW > 280.0f && valW > 1.0f)
+	{
+		float s = baseScale * (280.0f / valW);
+		valObj->Scale = (OGLVector3D) { s, s, s };
+		valW = 280.0f;
+	}
+
+	OGLRect labelExt = TextMesh_GetExtents(label);
+	float labelW = labelExt.right - labelExt.left;
+	float gap = 22.0f * GetMenuItemHeight(row);
+	float totalW = labelW + gap + valW;
+	if (totalW > 560.0f && totalW > 1.0f)
+	{
+		float shrink = 560.0f / totalW;
+		label->Scale.x *= shrink;
+		label->Scale.y *= shrink;
+		label->Scale.z *= shrink;
+		valObj->Scale.x *= shrink;
+		valObj->Scale.y *= shrink;
+		valObj->Scale.z *= shrink;
+		labelW *= shrink;
+		gap *= shrink;
+		valW *= shrink;
+		totalW = 560.0f;
+	}
+
+	label->Coord.x = -totalW * 0.5f;
+	valObj->Coord.x = label->Coord.x + labelW + gap;
+	UpdateObjectTransforms(label);
+	UpdateObjectTransforms(valObj);
+}
+
 static ObjNode* MakeTextInputValueObj(int row)
 {
 	DECLARE_WORKBUF(buf, bufSize);
@@ -1431,20 +1485,11 @@ static ObjNode* MakeTextInputValueObj(int row)
 	{
 		SDL_snprintf(buf, bufSize, "%s", val);
 	}
-	ObjNode* valObj = MakeText(buf, row, 1, 0);
+	ObjNode* valObj = MakeText(buf, row, 1, kTextMeshAlignLeft);
 	valObj->MoveCall = MoveControlBinding;
 	GetMenuNodeData(valObj)->col = 0;
 
-	float baseScale = GetMenuItemHeight(row) * gNav->style.standardScale;
-	valObj->Scale = (OGLVector3D) { baseScale, baseScale, baseScale };
-	OGLRect ext = TextMesh_GetExtents(valObj);
-	float w = ext.right - ext.left;
-	if (w > 260.0f && w > 1.0f)
-	{
-		float s = baseScale * (260.0f / w);
-		valObj->Scale = (OGLVector3D) { s, s, s };
-	}
-	UpdateObjectTransforms(valObj);
+	PositionTextInputPair(row);
 
 	return valObj;
 }
@@ -1706,6 +1751,52 @@ static void AwaitTextInput(void)
 		if (allowed)
 		{
 			buf[curLen++] = c;
+			buf[curLen] = '\0';
+			changed = true;
+		}
+	}
+
+	if (gTextInput[0] == '\0' && curLen < (maxLen - 1))
+	{
+		for (int sc = SDL_SCANCODE_A; sc <= SDL_SCANCODE_Z && curLen < (maxLen - 1); sc++)
+		{
+			if (GetNewKeyState((uint16_t)sc))
+			{
+				buf[curLen++] = (char)('A' + (sc - SDL_SCANCODE_A));
+				buf[curLen] = '\0';
+				changed = true;
+			}
+		}
+		for (int sc = SDL_SCANCODE_1; sc <= SDL_SCANCODE_9 && curLen < (maxLen - 1); sc++)
+		{
+			if (GetNewKeyState((uint16_t)sc))
+			{
+				buf[curLen++] = (char)('1' + (sc - SDL_SCANCODE_1));
+				buf[curLen] = '\0';
+				changed = true;
+			}
+		}
+		if (curLen < (maxLen - 1) && GetNewKeyState(SDL_SCANCODE_0))
+		{
+			buf[curLen++] = '0';
+			buf[curLen] = '\0';
+			changed = true;
+		}
+		if (curLen < (maxLen - 1) && GetNewKeyState(SDL_SCANCODE_PERIOD))
+		{
+			buf[curLen++] = '.';
+			buf[curLen] = '\0';
+			changed = true;
+		}
+		if (curLen < (maxLen - 1) && GetNewKeyState(SDL_SCANCODE_SPACE))
+		{
+			buf[curLen++] = ' ';
+			buf[curLen] = '\0';
+			changed = true;
+		}
+		if (curLen < (maxLen - 1) && GetNewKeyState(SDL_SCANCODE_MINUS))
+		{
+			buf[curLen++] = '-';
 			buf[curLen] = '\0';
 			changed = true;
 		}
@@ -2086,8 +2177,23 @@ static ObjNode* LayOutLabel(int row)
 	const MenuItem* entry = &gNav->menu[row];
 
 	ObjNode* label = MakeText(GetMenuItemLabel(entry), row, 0, 0);
-	label->ColorFilter = gNav->style.labelColor;
+	if (GetLayoutFlags(entry) & kMILayoutFlagHighlight)
+		label->ColorFilter = (OGLColorRGBA) {1.0f, 0.90f, 0.35f, 1.0f};
+	else
+		label->ColorFilter = gNav->style.labelColor;
 	label->MoveCall = MoveLabel;
+
+	float baseScale = GetMenuItemHeight(row) * gNav->style.standardScale;
+	label->Scale = (OGLVector3D) { baseScale, baseScale, baseScale };
+	OGLRect extents = TextMesh_GetExtents(label);
+	float width = extents.right - extents.left;
+	const float kMaxLabelWidth = 580.0f;
+	if (width > kMaxLabelWidth && width > 1.0f)
+	{
+		float clampedScale = baseScale * (kMaxLabelWidth / width);
+		label->Scale = (OGLVector3D) { clampedScale, clampedScale, clampedScale };
+	}
+	UpdateObjectTransforms(label);
 
 	return label;
 }
@@ -2262,12 +2368,11 @@ static ObjNode* LayOutTextInput(int row)
 	SDL_snprintf(buf, bufSize, "%s:", GetMenuItemLabel(entry));
 
 	ObjNode* label = MakeText(buf, row, 0, kTextMeshAlignLeft);
-	label->Coord.x -= 220;
 	label->ColorFilter = gNav->style.labelColor;
 	label->MoveCall = MoveLabel;
 
-	ObjNode* valObj = MakeTextInputValueObj(row);
-	valObj->Coord.x = 120;
+	(void)MakeTextInputValueObj(row);
+	PositionTextInputPair(row);
 
 	return label;
 }
@@ -2299,6 +2404,8 @@ static void LayOutMenu(int menuID)
 	float firstHeight = 0;
 	for (int row = 0; menu[row].type != kMISENTINEL; row++)
 	{
+		if (GetLayoutFlags(&menu[row]) & kMILayoutFlagHidden)
+			continue;
 		float height = GetMenuItemHeight(row);
 		if (firstHeight == 0)
 			firstHeight = height;

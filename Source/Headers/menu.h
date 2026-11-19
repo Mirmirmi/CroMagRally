@@ -83,6 +83,7 @@ enum	// Returned by getLayoutFlags
 {
 	kMILayoutFlagDisabled = 1 << 0,
 	kMILayoutFlagHidden = 1 << 1,
+	kMILayoutFlagHighlight = 1 << 2,
 };
 
 typedef struct MenuStyle
@@ -125,3 +126,4 @@ int GetCurrentMenu(void);
 ObjNode* GetCurrentMenuItemObject(void);
 float GetMenuIdleTime(void);
 void KillMenu(int returnCode);
+Boolean IsMenuEditingText(void);

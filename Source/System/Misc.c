@@ -12,6 +12,19 @@
 #include "game.h"
 #include "network.h"
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+
+EM_JS(void, Web_ShowAlertOverlay, (const char* message, int isFatal), {
+	const text = UTF8ToString(message);
+	if (isFatal && typeof window !== 'undefined' && typeof window.__croMagShowFatal === 'function') {
+		window.__croMagShowFatal(text);
+	} else if (!isFatal && typeof window !== 'undefined' && typeof window.__croMagShowAlert === 'function') {
+		window.__croMagShowAlert(text);
+	}
+});
+#endif
+
 extern	SDL_Window* 	gSDLWindow;
 
 
@@ -56,7 +69,11 @@ void DoAlert(const char* format, ...)
 	va_end(args);
 
 	SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Game Alert: %s", message);
+#ifdef __EMSCRIPTEN__
+	Web_ShowAlertOverlay(message, 0);
+#else
 	SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, GAME_FULL_NAME, message, NULL);
+#endif
 
 	Exit2D();
 }
@@ -75,7 +92,11 @@ void DoFatalAlert(const char* format, ...)
 	va_end(args);
 
 	SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Game Fatal Alert: %s", message);
+#ifdef __EMSCRIPTEN__
+	Web_ShowAlertOverlay(message, 1);
+#else
 	SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, GAME_FULL_NAME, message, NULL);//gSDLWindow);
+#endif
 
 	Exit2D();
 	CleanQuit();

@@ -67,7 +67,9 @@ add_compile_definitions(POMME_CASE_SENSITIVE_FSSPEC=1)
 # If SDL3_DIR wasn't specified, discover if the user put some prebuilt SDL3
 # package in the 'extern' directory
 if(NOT DEFINED SDL3_DIR)
-	if(APPLE)
+	if(EMSCRIPTEN)
+		set(_sdl3_maybe "${CMAKE_SOURCE_DIR}/extern/SDL3-3.2.8/install-emscripten/lib/cmake/SDL3")
+	elseif(APPLE)
 		set(_sdl3_maybe "${CMAKE_SOURCE_DIR}/extern/SDL3.framework/Resources/CMake")
 	elseif(WIN32)
 		set(_sdl3_maybe "${CMAKE_SOURCE_DIR}/extern/SDL3/cmake")
@@ -100,7 +102,9 @@ endif()
 add_subdirectory(extern/Pomme)
 add_subdirectory(extern/enet)
 
-find_package(OpenGL REQUIRED)
+if(NOT EMSCRIPTEN)
+	find_package(OpenGL REQUIRED)
+endif()
 
 #------------------------------------------------------------------------------
 # EXECUTABLE TARGET
@@ -205,7 +209,7 @@ if(SANITIZE)
 endif()
 
 # Explicitly link math lib on Linux
-if(NOT APPLE AND NOT WIN32)
+if(NOT APPLE AND NOT WIN32 AND NOT EMSCRIPTEN)
 	target_link_libraries(${GAME_TARGET} PRIVATE m)
 endif()
 
@@ -217,7 +221,38 @@ else()
 endif()
 
 # Link core dependencies
-target_link_libraries(${GAME_TARGET} PRIVATE Pomme enet OpenGL::GL)
+target_link_libraries(${GAME_TARGET} PRIVATE Pomme enet)
+if(NOT EMSCRIPTEN)
+	target_link_libraries(${GAME_TARGET} PRIVATE OpenGL::GL)
+endif()
+
+if(EMSCRIPTEN)
+	find_package(Python3 COMPONENTS Interpreter REQUIRED)
+	set(WEBDATA_DIR "${CMAKE_CURRENT_BINARY_DIR}/web-data")
+	execute_process(
+		COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/packaging/emscripten/prepare_web_assets.py"
+			--data-dir "${GAME_DATADIR}"
+			--out-dir "${WEBDATA_DIR}"
+		RESULT_VARIABLE _web_assets_rc
+	)
+	if(NOT _web_assets_rc EQUAL 0)
+		message(FATAL_ERROR "prepare_web_assets.py failed with code ${_web_assets_rc}")
+	endif()
+
+	set_target_properties(${GAME_TARGET} PROPERTIES SUFFIX ".js")
+	target_link_options(${GAME_TARGET} PRIVATE
+		-fexceptions
+		-sUSE_WEBGL2=1
+		-sFULL_ES3=1
+		-sALLOW_MEMORY_GROWTH=1
+		-sINITIAL_MEMORY=134217728
+		-sSTACK_SIZE=2097152
+		-sASYNCIFY=1
+		-sASYNCIFY_STACK_SIZE=65536
+		-lidbfs.js
+		"SHELL:--preload-file \"${WEBDATA_DIR}/preload@/Data\""
+	)
+endif()
 
 # Add required frameworks for KillMacMouseAcceleration
 if(APPLE)
@@ -284,14 +319,56 @@ set_target_properties(${GAME_TARGET} PROPERTIES
 # POST-BUILD (COPY ASSETS, ETC.)
 #------------------------------------------------------------------------------
 
-if(APPLE)
-	set(GAME_DATA_TARGET_LOCATION "$<TARGET_FILE_DIR:${GAME_TARGET}>/../Resources")
+if(EMSCRIPTEN)
+	add_custom_command(TARGET ${GAME_TARGET} POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			"${CMAKE_SOURCE_DIR}/packaging/emscripten/index.html"
+			"$<TARGET_FILE_DIR:${GAME_TARGET}>/index.html"
+		COMMAND ${CMAKE_COMMAND} -E make_directory
+			"$<TARGET_FILE_DIR:${GAME_TARGET}>/assets"
+		COMMAND ${CMAKE_COMMAND} -E copy_directory
+			"${CMAKE_SOURCE_DIR}/packaging/emscripten/assets"
+			"$<TARGET_FILE_DIR:${GAME_TARGET}>/assets"
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			"${CMAKE_SOURCE_DIR}/Data/Images/Pillarbox.jpg"
+			"$<TARGET_FILE_DIR:${GAME_TARGET}>/assets/pillarbox.jpg"
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			"${CMAKE_SOURCE_DIR}/Data/Images/MainMenuBackground.jpg"
+			"$<TARGET_FILE_DIR:${GAME_TARGET}>/assets/main-menu-bg.jpg"
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			"${CMAKE_SOURCE_DIR}/packaging/io.jor.cromagrally-alternateicon.png"
+			"$<TARGET_FILE_DIR:${GAME_TARGET}>/assets/cro-mag-emblem.png"
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			"${CMAKE_SOURCE_DIR}/rawdata/sprites/rockfont/#92.FIXW.png"
+			"$<TARGET_FILE_DIR:${GAME_TARGET}>/assets/bone.png"
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			"${CMAKE_SOURCE_DIR}/rawdata/sprites/infobar/#29.png"
+			"$<TARGET_FILE_DIR:${GAME_TARGET}>/assets/bone-plaque.png"
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			"${CMAKE_SOURCE_DIR}/rawdata/sprites/infobar/#10.png"
+			"$<TARGET_FILE_DIR:${GAME_TARGET}>/assets/bone-medallion.png"
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			"${CMAKE_SOURCE_DIR}/rawdata/sprites/infobar/#31.png"
+			"$<TARGET_FILE_DIR:${GAME_TARGET}>/assets/torch-medallion.png"
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			"${CMAKE_SOURCE_DIR}/rawdata/sprites/infobar/#24.png"
+			"$<TARGET_FILE_DIR:${GAME_TARGET}>/assets/arrowhead.png"
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			"${CMAKE_SOURCE_DIR}/rawdata/sprites/infobar/#01.png"
+			"$<TARGET_FILE_DIR:${GAME_TARGET}>/assets/caveman-slate.png"
+		COMMAND ${CMAKE_COMMAND} -E copy_directory
+			"${WEBDATA_DIR}/lazy/Data"
+			"$<TARGET_FILE_DIR:${GAME_TARGET}>/Data")
 else()
-	set(GAME_DATA_TARGET_LOCATION "$<TARGET_FILE_DIR:${GAME_TARGET}>/Data")
-endif()
+	if(APPLE)
+		set(GAME_DATA_TARGET_LOCATION "$<TARGET_FILE_DIR:${GAME_TARGET}>/../Resources")
+	else()
+		set(GAME_DATA_TARGET_LOCATION "$<TARGET_FILE_DIR:${GAME_TARGET}>/Data")
+	endif()
 
-add_custom_command(TARGET ${GAME_TARGET} POST_BUILD
-	COMMAND ${CMAKE_COMMAND} -E copy_directory "${GAME_DATADIR}" "${GAME_DATA_TARGET_LOCATION}")
+	add_custom_command(TARGET ${GAME_TARGET} POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -E copy_directory "${GAME_DATADIR}" "${GAME_DATA_TARGET_LOCATION}")
+endif()
 
 if(APPLE)
 	set(INFO_PLIST "${GAME_DATA_TARGET_LOCATION}/../Info.plist")
@@ -321,7 +398,7 @@ endif()
 configure_file(${CMAKE_SOURCE_DIR}/packaging/ReadMe.txt.in ${CMAKE_CURRENT_BINARY_DIR}/ReadMe.txt)
 
 include(CTest)
-if(BUILD_TESTING AND NOT WIN32)
+if(BUILD_TESTING AND NOT WIN32 AND NOT EMSCRIPTEN)
 	add_executable(net_loopback_test
 		tests/net_loopback_test.c
 		${GAME_SRCDIR}/System/network.c
