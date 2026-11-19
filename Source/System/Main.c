@@ -509,9 +509,6 @@ short	placeToWin,startStage;
 			/* NEXT AGE */
 
 		DoAgeConqueredScreen();
-
-
-		canAbort = false;
 	}																		// next age
 
 

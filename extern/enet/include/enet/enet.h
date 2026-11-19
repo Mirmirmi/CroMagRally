@@ -608,6 +608,8 @@ ENET_API size_t enet_range_coder_decompress (void *, const enet_uint8 *, size_t,
    
 extern size_t enet_protocol_command_size (enet_uint8);
 
+#include "enet/relay.h"
+
 #ifdef __cplusplus
 }
 #endif

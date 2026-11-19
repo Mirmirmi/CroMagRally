@@ -2,7 +2,7 @@
  @file  unix.c
  @brief ENet Unix system specific functions
 */
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -446,6 +446,10 @@ enet_socket_send (ENetSocket socket,
     struct sockaddr_in sin;
     int sentLength;
 
+    sentLength = enet_relay_try_send (address, buffers, bufferCount);
+    if (sentLength >= 0)
+      return sentLength;
+
     memset (& msgHdr, 0, sizeof (struct msghdr));
 
     if (address != NULL)
@@ -486,39 +490,65 @@ enet_socket_receive (ENetSocket socket,
     struct sockaddr_in sin;
     int recvLength;
 
-    memset (& msgHdr, 0, sizeof (struct msghdr));
+    recvLength = enet_relay_try_receive (address, buffers, bufferCount);
+    if (recvLength != 0)
+      return recvLength;
 
-    if (address != NULL)
+    for (int probeIter = 0; probeIter < 16; ++ probeIter)
     {
-        msgHdr.msg_name = & sin;
-        msgHdr.msg_namelen = sizeof (struct sockaddr_in);
-    }
+        memset (& msgHdr, 0, sizeof (struct msghdr));
 
-    msgHdr.msg_iov = (struct iovec *) buffers;
-    msgHdr.msg_iovlen = bufferCount;
+        if (address != NULL)
+        {
+            msgHdr.msg_name = & sin;
+            msgHdr.msg_namelen = sizeof (struct sockaddr_in);
+        }
 
-    recvLength = recvmsg (socket, & msgHdr, MSG_NOSIGNAL);
+        msgHdr.msg_iov = (struct iovec *) buffers;
+        msgHdr.msg_iovlen = bufferCount;
 
-    if (recvLength == -1)
-    {
-       if (errno == EWOULDBLOCK)
-         return 0;
+        recvLength = recvmsg (socket, & msgHdr, MSG_NOSIGNAL);
 
-       return -1;
-    }
+        if (recvLength == -1)
+        {
+           if (errno == EWOULDBLOCK)
+             return 0;
+
+           return -1;
+        }
 
 #ifdef HAS_MSGHDR_FLAGS
-    if (msgHdr.msg_flags & MSG_TRUNC)
-      return -2;
+        if (msgHdr.msg_flags & MSG_TRUNC)
+          return -2;
 #endif
 
-    if (address != NULL)
-    {
-        address -> host = (enet_uint32) sin.sin_addr.s_addr;
-        address -> port = ENET_NET_TO_HOST_16 (sin.sin_port);
+        if (address != NULL && recvLength == 8 && bufferCount >= 1 && buffers[0].data != NULL && buffers[0].dataLength >= 8)
+        {
+            const enet_uint8 * rxBytes = (const enet_uint8 *) buffers[0].data;
+            enet_uint32 magic = 0;
+            memcpy (& magic, rxBytes, 4);
+            if (magic == ENET_HOST_TO_NET_32 (ENET_RELAY_PROBE_MAGIC) &&
+                enet_relay_check_probe_room_code (rxBytes + 4))
+            {
+                enet_uint8 ack[8];
+                enet_uint32 ackMagic = ENET_HOST_TO_NET_32 (ENET_RELAY_ACK_MAGIC);
+                memcpy (ack, & ackMagic, 4);
+                memcpy (ack + 4, rxBytes + 4, 4);
+                sendto (socket, ack, sizeof (ack), MSG_NOSIGNAL, (struct sockaddr *) & sin, sizeof (sin));
+                continue;
+            }
+        }
+
+        if (address != NULL)
+        {
+            address -> host = (enet_uint32) sin.sin_addr.s_addr;
+            address -> port = ENET_NET_TO_HOST_16 (sin.sin_port);
+        }
+
+        return recvLength;
     }
 
-    return recvLength;
+    return 0;
 }
 
 int

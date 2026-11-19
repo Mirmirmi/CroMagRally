@@ -82,8 +82,7 @@
     }
 
     a:focus-visible,
-    .play-btn:focus-visible,
-    .hud-btn:focus-visible {
+    .play-btn:focus-visible {
       outline: 3px solid var(--focus-ring);
       outline-offset: 3px;
     }
@@ -749,39 +748,6 @@
       filter: drop-shadow(0 4px 6px rgba(32, 16, 4, 0.45));
     }
 
-    #hud-controls {
-      position: fixed;
-      inset-block-start: max(12px, env(safe-area-inset-top));
-      inset-inline-end: max(12px, env(safe-area-inset-right));
-      z-index: 15;
-      display: none;
-    }
-
-    #hud-controls.visible {
-      display: flex;
-      gap: 8px;
-    }
-
-    .hud-btn {
-      appearance: none;
-      min-block-size: 40px;
-      padding: 8px 14px;
-      border-radius: 10px;
-      border: 2px solid #8a5729;
-      background: rgba(29, 17, 9, 0.82);
-      color: var(--ink-light);
-      font-size: 0.82rem;
-      font-weight: 700;
-      cursor: pointer;
-      backdrop-filter: blur(6px);
-      transition: background 0.15s ease, border-color 0.15s ease;
-    }
-
-    .hud-btn:hover {
-      background: rgba(54, 32, 16, 0.94);
-      border-color: #d99142;
-    }
-
     #fatal-banner {
       position: fixed;
       inset: 0;
@@ -850,10 +816,6 @@
 <body>
   <div id="stage">
     <canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
-  </div>
-
-  <div id="hud-controls">
-    <button id="fullscreen-btn" class="hud-btn" type="button">Fullscreen</button>
   </div>
 
   <main id="overlay" aria-label="Cro-Mag Rally welcome screen">
@@ -1048,8 +1010,6 @@
       const progressFill = document.getElementById('progress-fill');
       const statusText = document.getElementById('status-text');
       const playBtn = document.getElementById('play-btn');
-      const hudControls = document.getElementById('hud-controls');
-      const fullscreenBtn = document.getElementById('fullscreen-btn');
       const fatalBanner = document.getElementById('fatal-banner');
       const fatalMessage = document.getElementById('fatal-message');
       const alertToast = document.getElementById('alert-toast');
@@ -1061,6 +1021,15 @@
       if (isIOS || isAndroid) {
         document.documentElement.classList.add('unsupported-device');
       }
+
+      try {
+        const rawRoom = new URLSearchParams(window.location.search || '').get('room') || '';
+        const normRoom = rawRoom.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+        if (normRoom.length === 4) {
+          window.__croMagInitialRoomCode = normRoom;
+          playBtn.textContent = 'Join Room ' + normRoom + ' — Start Racing!';
+        }
+      } catch (e) {}
 
       let started = false;
       let bootCompleted = false;
@@ -1108,7 +1077,6 @@
         if (bootCompleted) return;
         bootCompleted = true;
         overlay.classList.add('hidden');
-        hudControls.classList.add('visible');
         canvas.focus();
       }
 
@@ -1152,15 +1120,6 @@
         });
       }
 
-      fullscreenBtn.addEventListener('click', function () {
-        if (!document.fullscreenElement) {
-          (canvas.requestFullscreen ? canvas.requestFullscreen() : document.documentElement.requestFullscreen()).catch(function () {});
-        } else {
-          document.exitFullscreen().catch(function () {});
-        }
-        canvas.focus();
-      });
-
       canvas.addEventListener('pointerdown', function () {
         canvas.focus();
       });
@@ -1179,8 +1138,13 @@
         progressSection.classList.add('active');
         statusText.textContent = 'Rolling boulders to the starting line...';
 
+        const BUNDLE_VER = '5.0.5-p5';
+
         window.Module = {
           canvas: canvas,
+          locateFile: function (path, prefix) {
+            return (prefix || '') + path + (path.indexOf('?') === -1 ? '?v=' + BUNDLE_VER : '');
+          },
           print: function (text) { console.log(text); },
           printErr: function (text) { console.error(text); },
           setStatus: function (text) {
@@ -1216,7 +1180,7 @@
         };
 
         const script = document.createElement('script');
-        script.src = 'CroMagRally.js';
+        script.src = 'CroMagRally.js?v=' + BUNDLE_VER;
         script.async = true;
         script.onerror = function () {
           window.__croMagShowFatal('Could not reach the starting line. Check your connection and try reloading the page.');

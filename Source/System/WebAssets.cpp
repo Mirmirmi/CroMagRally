@@ -13,6 +13,27 @@ extern "C" {
 #include "game.h"
 }
 
+EM_JS(void, Web_PrefetchFilesAsync, (const char* pathsCsv), {
+	const paths = UTF8ToString(pathsCsv).split('|').filter(Boolean);
+	if (typeof window === 'undefined') return;
+	window.__croMagPendingFetches = window.__croMagPendingFetches || {};
+	for (const vfsPath of paths) {
+		try {
+			if (FS.analyzePath(vfsPath).exists) continue;
+		} catch (e) {}
+		if (window.__croMagPendingFetches[vfsPath]) continue;
+		const relUrl = vfsPath.startsWith('/') ? vfsPath.slice(1) : vfsPath;
+		window.__croMagPendingFetches[vfsPath] = fetch(relUrl).then(async (resp) => {
+			if (!resp.ok) throw new Error('HTTP ' + resp.status + ' fetching ' + relUrl);
+			return new Uint8Array(await resp.arrayBuffer());
+		}).catch((err) => {
+			delete window.__croMagPendingFetches[vfsPath];
+			console.warn('WebAssets prefetch failed for', relUrl, err);
+			return null;
+		});
+	}
+});
+
 EM_ASYNC_JS(int, Web_FetchFilesAsync, (const char* pathsCsv, const char* label), {
 	const paths = UTF8ToString(pathsCsv).split('|').filter(Boolean);
 	const labelText = UTF8ToString(label);
@@ -30,14 +51,25 @@ EM_ASYNC_JS(int, Web_FetchFilesAsync, (const char* pathsCsv, const char* label),
 		window.__croMagShowAlert(labelText || 'Loading track assets...');
 	}
 
+	const pending = (typeof window !== 'undefined' && window.__croMagPendingFetches)
+		? window.__croMagPendingFetches
+		: null;
+
 	try {
 		await Promise.all(missing.map(async (vfsPath) => {
-			const relUrl = vfsPath.startsWith('/') ? vfsPath.slice(1) : vfsPath;
-			const resp = await fetch(relUrl);
-			if (!resp.ok) {
-				throw new Error('HTTP ' + resp.status + ' fetching ' + relUrl);
+			let buf = null;
+			if (pending && pending[vfsPath]) {
+				buf = await pending[vfsPath];
+				delete pending[vfsPath];
 			}
-			const buf = new Uint8Array(await resp.arrayBuffer());
+			if (!buf) {
+				const relUrl = vfsPath.startsWith('/') ? vfsPath.slice(1) : vfsPath;
+				const resp = await fetch(relUrl);
+				if (!resp.ok) {
+					throw new Error('HTTP ' + resp.status + ' fetching ' + relUrl);
+				}
+				buf = new Uint8Array(await resp.arrayBuffer());
+			}
 			const slash = vfsPath.lastIndexOf('/');
 			if (slash > 0) {
 				FS.mkdirTree(vfsPath.slice(0, slash));
@@ -113,8 +145,8 @@ static const char* kSongBaseName[MAX_SONGS] =
 	"CreteSong",    // SONG_CRETE
 	"EuroSong",     // SONG_EUROPE
 	"IceSong",      // SONG_ICE
-	"EgyptSong",    // SONG_EGYPT
 	"VikingSong",   // SONG_VIKING
+	"EgyptSong",    // SONG_EGYPT
 };
 
 static int GetSongForTrack(int trackNum)
@@ -141,12 +173,9 @@ static int GetSongForTrack(int trackNum)
 	}
 }
 
-extern "C" void WebAssets_EnsureTrackLoaded(int trackNum)
+static void BuildTrackAssetCsv(int trackNum, std::string& csv)
 {
-	if (trackNum < 0 || trackNum >= NUM_TRACKS)
-		return;
-
-	std::string csv;
+	csv.clear();
 	csv += "/Data/Terrain/";
 	csv += kTrackTerrainBase[trackNum];
 	csv += ".ter|/Data/Terrain/";
@@ -171,8 +200,26 @@ extern "C" void WebAssets_EnsureTrackLoaded(int trackNum)
 		csv += kSongBaseName[songNum];
 		csv += ".ogg";
 	}
+}
 
+extern "C" void WebAssets_EnsureTrackLoaded(int trackNum)
+{
+	if (trackNum < 0 || trackNum >= NUM_TRACKS)
+		return;
+
+	std::string csv;
+	BuildTrackAssetCsv(trackNum, csv);
 	Web_FetchFilesAsync(csv.c_str(), "Downloading track assets...");
+}
+
+extern "C" void WebAssets_PrefetchTrack(int trackNum)
+{
+	if (trackNum < 0 || trackNum >= NUM_TRACKS)
+		return;
+
+	std::string csv;
+	BuildTrackAssetCsv(trackNum, csv);
+	Web_PrefetchFilesAsync(csv.c_str());
 }
 
 extern "C" void WebAssets_EnsureSongLoaded(int songNum)
@@ -190,6 +237,11 @@ extern "C" void WebAssets_EnsureSongLoaded(int songNum)
 #else
 
 extern "C" void WebAssets_EnsureTrackLoaded(int trackNum)
+{
+	(void)trackNum;
+}
+
+extern "C" void WebAssets_PrefetchTrack(int trackNum)
 {
 	(void)trackNum;
 }
